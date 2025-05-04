@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useTransition } from 'react';
@@ -24,8 +25,8 @@ export function ClickButton({ initialQuota }: ClickButtonProps) {
   const handleButtonClick = async () => {
     if (remainingQuota <= 0 || isLoading || isPending) {
       toast({
-        title: "無法點擊",
-        description: remainingQuota <= 0 ? "您今天的點擊次數已用完。" : "請稍候再試。",
+        title: "無法點擊 (Cannot Click)",
+        description: remainingQuota <= 0 ? "您今天的點擊次數已用完。(Your clicks for today are used up.)" : "請稍候再試。(Please wait and try again.)",
         variant: "destructive",
       });
       return;
@@ -38,16 +39,29 @@ export function ClickButton({ initialQuota }: ClickButtonProps) {
         const result = await handleClickAction();
 
         if (result.success) {
-          setRemainingQuota((prev) => prev - 1); // Decrease quota locally immediately for responsiveness
+          // Ensure quota doesn't visually go below 0 if multiple clicks happen before state update
+          setRemainingQuota((prev) => Math.max(0, prev - 1));
+
+          // Determine title and description based on reward
+          let toastTitle = "點擊成功！(Click Successful!)";
+          let toastDescription = "點擊已記錄 (Click recorded)."; // Default simple message
+
+          if (result.rewardWon && result.rewardWon > 0) {
+            // Only show the detailed win message if a reward was won
+            toastTitle = "恭喜！(Congratulations!)";
+            // Use the specific win message from the server action, or a fallback
+            toastDescription = result.message || `您贏得了 $${result.rewardWon}! (You won $${result.rewardWon}!)`;
+          }
+
           toast({
-            title: "點擊成功！",
-            description: result.message,
+            title: toastTitle,
+            description: toastDescription,
           });
-          // Optionally trigger a UI update for global count or reward info here if needed
+
         } else {
           toast({
-            title: "點擊失敗",
-            description: result.error || "發生未知錯誤。",
+            title: "點擊失敗 (Click Failed)",
+            description: result.error || "發生未知錯誤。(An unknown error occurred.)",
             variant: "destructive",
           });
           // If the server says the quota was actually 0, sync the state
@@ -58,8 +72,8 @@ export function ClickButton({ initialQuota }: ClickButtonProps) {
       } catch (error) {
         console.error("Click action error:", error);
         toast({
-          title: "點擊時發生錯誤",
-          description: "請稍後再試。",
+          title: "點擊時發生錯誤 (Error During Click)",
+          description: "請稍後再試。(Please try again later.)",
           variant: "destructive",
         });
       } finally {
@@ -85,14 +99,15 @@ export function ClickButton({ initialQuota }: ClickButtonProps) {
         ) : (
           <Zap className="mr-2 h-6 w-6" />
         )}
-        {isLoading || isPending ? '處理中...' : '點擊我!'}
+        {isLoading || isPending ? '處理中... (Processing...)' : '點擊我! (Click Me!)'}
       </Button>
       <p className="text-sm text-muted-foreground">
-        剩餘點擊次數: {remainingQuota}
+        剩餘點擊次數 (Clicks Remaining): {remainingQuota}
       </p>
        {remainingQuota <= 0 && (
-         <p className="text-sm text-accent-foreground font-semibold">今天次數已用完，明天再來！</p>
+         <p className="text-sm text-accent-foreground font-semibold">今天次數已用完，明天再來！(Clicks used up for today, come back tomorrow!)</p>
        )}
     </div>
   );
 }
+
