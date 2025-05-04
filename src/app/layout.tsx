@@ -1,18 +1,23 @@
+
 import type {Metadata} from 'next';
-import {Geist, Geist_Mono} from 'next/font/google';
+import {Inter} from 'next/font/google'; // Use Inter or keep Geist
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"; // Import Toaster
-import { GoogleSignInButton } from '@/components/auth/google-signin-button'; // Import the new button
+import { AuthDisplay } from '@/components/auth/auth-display'; // Import the new AuthDisplay component
 
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
+const inter = Inter({ subsets: ['latin'] }); // Example using Inter
 
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-});
+// If keeping Geist:
+// import { Geist, Geist_Mono } from 'next/font/google';
+// const geistSans = Geist({
+//   variable: '--font-geist-sans',
+//   subsets: ['latin'],
+// });
+// const geistMono = Geist_Mono({
+//   variable: '--font-geist-mono',
+//   subsets: ['latin'],
+// });
+// const fontVariables = `${geistSans.variable} ${geistMono.variable}`;
 
 export const metadata: Metadata = {
   title: 'Click2Win', // Updated title
@@ -25,13 +30,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    // Apply dark class by default if :root styling isn't sufficient or preferred
-    // <html lang="en" className="dark">
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen`}>
+      {/* Use appropriate font class based on your choice */}
+      <body className={`${inter.className} antialiased flex flex-col min-h-screen`}>
+        {/* Or if using Geist: <body className={`${fontVariables} antialiased flex flex-col min-h-screen`}> */}
         <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <div className="container flex h-14 items-center justify-end">
-                 <GoogleSignInButton />
+                 <AuthDisplay /> {/* Use the new AuthDisplay component */}
             </div>
         </header>
         <main className="flex-1">

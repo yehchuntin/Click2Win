@@ -1,7 +1,8 @@
+
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import { Button } from '@/components/ui/button';
 import { auth } from '@/lib/firebase/client'; // Import initialized auth
 import { isFirebaseConfigured } from '@/lib/firebase/config'; // Correct import path
@@ -15,11 +16,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { SignInModal } from './sign-in-modal'; // Import the new modal
 
-
-export function GoogleSignInButton() {
+export function AuthDisplay() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     if (!auth) {
@@ -29,15 +31,17 @@ export function GoogleSignInButton() {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoading(false);
-      // TODO: Potentially update global state or context here
-       if (currentUser) {
-           console.log("User signed in:", currentUser.uid, currentUser.displayName);
+      // Close modal on successful sign-in
+      if (currentUser) {
+          setIsModalOpen(false);
+          console.log("User signed in:", currentUser.uid, currentUser.displayName);
+           // TODO: Potentially update global state or context here
            // You might want to call an action here to ensure the user exists
            // in your backend database (e.g., src/services/account.ts)
            // ensureUserExists(currentUser.uid, currentUser.displayName || '', currentUser.email || '');
-       } else {
-            console.log("User signed out");
-       }
+      } else {
+           console.log("User signed out");
+      }
     });
 
     // Cleanup subscription on unmount
@@ -45,22 +49,10 @@ export function GoogleSignInButton() {
   }, []);
 
 
-  const handleSignIn = async () => {
-    if (!auth) return;
-    const provider = new GoogleAuthProvider();
-    try {
-      await signInWithPopup(auth, provider);
-      // State update will be handled by onAuthStateChanged
-    } catch (error) {
-      console.error("Error during Google Sign-In:", error);
-      // TODO: Show error toast to user
-    }
-  };
-
   const handleSignOut = async () => {
     if (!auth) return;
     try {
-      await signOut(auth);
+      await auth.signOut(); // Use auth directly
        // State update will be handled by onAuthStateChanged
     } catch (error) {
       console.error("Error during Sign Out:", error);
@@ -119,10 +111,14 @@ export function GoogleSignInButton() {
     );
   }
 
+  // User is not logged in, show Sign In button triggering the modal
   return (
-    <Button onClick={handleSignIn} variant="outline" size="sm">
-        <LogIn className="mr-2 h-4 w-4" />
-        Sign in with Google
-    </Button>
+     <>
+        <Button onClick={() => setIsModalOpen(true)} variant="outline" size="sm">
+            <LogIn className="mr-2 h-4 w-4" />
+            Sign In
+        </Button>
+        <SignInModal isOpen={isModalOpen} onOpenChange={setIsModalOpen} />
+     </>
   );
 }

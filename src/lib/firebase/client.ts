@@ -1,6 +1,7 @@
+
 // src/lib/firebase/client.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { getAuth, signOut } from "firebase/auth"; // Added signOut export
 import { getFirestore } from "firebase/firestore";
 import { firebaseConfig, isFirebaseConfigured } from "./config";
 
@@ -9,4 +10,4 @@ const app = !getApps().length && isFirebaseConfigured ? initializeApp(firebaseCo
 const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 
-export { app, auth, db };
+export { app, auth, db, signOut }; // Export signOut
