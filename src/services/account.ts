@@ -27,7 +27,7 @@ export interface UserAccount {
 // --- Mock Database ---
 // In a real app, this would be Firestore, Supabase, etc.
 const MOCK_USER_DB: Record<string, UserAccount> = {
-  "test-user": {
+  "test-user": { // Pre-existing test user
     userId: "test-user",
     dailyClickQuota: 0, // Will be calculated dynamically
     referralCount: 2,
@@ -36,62 +36,82 @@ const MOCK_USER_DB: Record<string, UserAccount> = {
 };
 // ---------------------
 
+// Track last reset time (simple in-memory version)
+const lastResetTimes: Record<string, number> = {}; // Stores last reset timestamp (ms) per user
+
 /**
  * Simulates resetting daily quotas and referral claims at midnight.
  * In a real app, this would be a cron job or scheduled function.
  */
-async function simulateDailyReset(userId: string): Promise<void> {
-  if (MOCK_USER_DB[userId]) {
-     // Recalculate quota based on current reward target
-    const globalClickCount = await getGlobalClickCount(); // Fetch fresh count
-    const currentReward = getCurrentRewardTarget(globalClickCount);
-    MOCK_USER_DB[userId].dailyClickQuota = calculateDailyQuota(currentReward.amount);
-    MOCK_USER_DB[userId].referralsClaimedToday = 0;
-    console.log(`Simulated daily reset for ${userId}: Quota=${MOCK_USER_DB[userId].dailyClickQuota}`);
-  }
+async function simulateDailyReset(userId: string, forceReset = false): Promise<void> {
+    const now = Date.now();
+    const lastReset = lastResetTimes[userId] || 0;
+    const todayStart = new Date().setHours(0, 0, 0, 0); // Timestamp for start of today
+
+    // Reset if it's a new day or forceReset is true
+    if (forceReset || lastReset < todayStart) {
+        if (MOCK_USER_DB[userId]) {
+            // Recalculate quota based on current reward target
+            const globalClickCount = await getGlobalClickCount(); // Fetch fresh count
+            const currentReward = getCurrentRewardTarget(globalClickCount);
+            MOCK_USER_DB[userId].dailyClickQuota = calculateDailyQuota(currentReward.amount);
+            MOCK_USER_DB[userId].referralsClaimedToday = 0;
+            lastResetTimes[userId] = now; // Update last reset time
+            console.log(`Simulated daily reset for ${userId}: Quota=${MOCK_USER_DB[userId].dailyClickQuota}`);
+        }
+    }
 }
 
 /**
+ * Ensures a user exists in the database, creating a default entry if not.
+ * This is often called after a successful sign-in.
+ *
+ * @param userId The ID of the user to check/create.
+ * @returns A promise that resolves when the user exists.
+ */
+export async function ensureUserExists(userId: string): Promise<void> {
+    if (!MOCK_USER_DB[userId]) {
+        console.log(`User ${userId} not found, creating default entry.`);
+        MOCK_USER_DB[userId] = {
+            userId: userId,
+            dailyClickQuota: 0, // Will be set by simulateDailyReset
+            referralCount: 0,
+            referralsClaimedToday: 0,
+        };
+        await simulateDailyReset(userId, true); // Force initial calculation
+    }
+    // If user already exists, ensure their daily state is up-to-date
+    else {
+        await simulateDailyReset(userId);
+    }
+}
+
+
+/**
  * Asynchronously retrieves a user account by ID.
- * Simulates daily reset if the quota seems off (e.g., 0 when it shouldn't be).
+ * Ensures daily state is updated before returning.
  *
  * @param userId The ID of the user account to retrieve.
  * @returns A promise that resolves to a UserAccount object.
+ * @throws Error if the user cannot be found or created.
  */
 export async function getUserAccount(userId: string): Promise<UserAccount> {
   console.log(`Attempting to get account for: ${userId}`);
   // Simulate API delay
   await new Promise(resolve => setTimeout(resolve, 50));
 
-  // Simulate daily reset check (in a real app, rely on backend logic/cron jobs)
-  // Basic check: If quota is 0, maybe it needs a reset (crude simulation)
-  if (MOCK_USER_DB[userId] && MOCK_USER_DB[userId].dailyClickQuota <= 0) {
-     // Check if a reset might be needed. THIS IS VERY SIMPLISTIC.
-     // A real app tracks the last reset time.
-     console.log(`Quota is 0 for ${userId}, simulating potential daily reset...`);
-     await simulateDailyReset(userId); // This updates the mock DB directly
-  } else if (!MOCK_USER_DB[userId]) {
-      console.log(`User ${userId} not found, creating default entry.`);
-      // Create a default user if not found
-      MOCK_USER_DB[userId] = {
-          userId: userId,
-          dailyClickQuota: 0, // Reset will calculate this
-          referralCount: 0,
-          referralsClaimedToday: 0,
-      };
-      await simulateDailyReset(userId); // Calculate initial quota
-  }
-
+  // Ensure user exists and daily state is updated
+  await ensureUserExists(userId);
 
   console.log("Current Mock DB state:", MOCK_USER_DB);
-
 
   if (MOCK_USER_DB[userId]) {
      console.log(`Returning account for ${userId}:`, MOCK_USER_DB[userId]);
     return { ...MOCK_USER_DB[userId] }; // Return a copy
   } else {
-     // This case should technically be handled by the creation logic above
-    throw new Error(`User account not found for userId: ${userId}`);
+    // This should ideally not happen due to ensureUserExists, but handle defensively
+    console.error(`Failed to find or create user account for userId: ${userId}`);
+    throw new Error(`User account could not be retrieved for userId: ${userId}`);
   }
 }
 
@@ -106,11 +126,14 @@ export async function updateUserDailyClickQuota(userId: string, newQuota: number
   // Simulate API delay
   await new Promise(resolve => setTimeout(resolve, 30));
 
+  // Ensure user exists before updating
+  await ensureUserExists(userId);
+
   if (MOCK_USER_DB[userId]) {
     MOCK_USER_DB[userId].dailyClickQuota = Math.max(0, newQuota); // Ensure quota doesn't go below 0
     console.log(`Updated quota for ${userId} to ${MOCK_USER_DB[userId].dailyClickQuota}`);
   } else {
-    console.warn(`User not found, cannot update quota for ${userId}`);
+    console.warn(`User not found after ensure check, cannot update quota for ${userId}`);
     // Optionally throw an error
   }
   return;
@@ -126,6 +149,9 @@ export async function incrementUserReferralCount(userId: string): Promise<void> 
   // Simulate API delay
   await new Promise(resolve => setTimeout(resolve, 40));
 
+  // Ensure user exists before updating
+  await ensureUserExists(userId);
+
   if (MOCK_USER_DB[userId]) {
     MOCK_USER_DB[userId].referralCount += 1;
 
@@ -140,7 +166,7 @@ export async function incrementUserReferralCount(userId: string): Promise<void> 
     }
 
   } else {
-    console.warn(`User not found, cannot increment referral count for ${userId}`);
+    console.warn(`User not found after ensure check, cannot increment referral count for ${userId}`);
     // Optionally throw an error
   }
   return;

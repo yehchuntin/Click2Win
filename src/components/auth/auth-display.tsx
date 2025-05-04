@@ -1,12 +1,11 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { useState } from 'react'; // Only useState needed now
 import { Button } from '@/components/ui/button';
-import { auth } from '@/lib/firebase/client'; // Import initialized auth
-import { isFirebaseConfigured } from '@/lib/firebase/config'; // Correct import path
-import { LogIn, LogOut, User as UserIcon, AlertTriangle } from 'lucide-react';
+import { auth, signOut } from '@/lib/firebase/client'; // Import signOut
+import { isFirebaseConfigured } from '@/lib/firebase/config';
+import { LogIn, LogOut, User as UserIcon, Loader2 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -15,64 +14,51 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { SignInModal } from './sign-in-modal'; // Import the new modal
+} from "@/components/ui/dropdown-menu";
+import { SignInModal } from './sign-in-modal';
+import { useAuth } from '@/hooks/use-auth'; // Import the useAuth hook
+import { ensureUserExists } from '@/services/account'; // Import ensureUserExists
 
 export function AuthDisplay() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, loading } = useAuth(); // Use the hook to get user and loading state
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  useEffect(() => {
-    // Early return if Firebase isn't configured
-    // This prevents errors if auth is null
-    if (!isFirebaseConfigured || !auth) {
-        console.warn("Firebase not configured or auth object is null. Auth functionality disabled.");
-        setLoading(false);
-        return;
-    }
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-      // Close modal on successful sign-in
-      if (currentUser) {
-          setIsModalOpen(false);
-          console.log("User signed in:", currentUser.uid, currentUser.displayName);
-           // TODO: Potentially update global state or context here
-           // You might want to call an action here to ensure the user exists
-           // in your backend database (e.g., src/services/account.ts)
-           // ensureUserExists(currentUser.uid, currentUser.displayName || '', currentUser.email || '');
-      } else {
-           console.log("User signed out");
-      }
-    });
-
-    // Cleanup subscription on unmount
-    return () => unsubscribe();
-  }, []);
+   // Effect to ensure user exists in backend after login (moved from original useEffect)
+    useState(() => {
+        if (user) {
+             console.log("AuthDisplay: User logged in, ensuring existence in DB:", user.uid);
+             ensureUserExists(user.uid)
+                .then(() => console.log(`User ${user.uid} ensured in DB.`))
+                .catch(err => console.error(`Error ensuring user ${user.uid} exists:`, err));
+        }
+    }, [user]); // Rerun when user object changes
 
 
   const handleSignOut = async () => {
     if (!auth) return;
     try {
-      await auth.signOut(); // Use auth directly
-       // State update will be handled by onAuthStateChanged
+       await signOut(auth); // Call signOut directly
+       // Auth state change is handled by the useAuth hook's onAuthStateChanged listener
+       console.log("User signed out via AuthDisplay button.");
     } catch (error) {
       console.error("Error during Sign Out:", error);
        // TODO: Show error toast to user
     }
   };
 
-  // Render nothing if Firebase is not configured, instead of a warning button
+  // Render nothing if Firebase is not configured
   if (!isFirebaseConfigured) {
+     console.warn("AuthDisplay: Firebase not configured. Hiding component.");
      return null;
   }
 
   if (loading) {
-    return <Button variant="outline" disabled size="sm">Loading...</Button>;
+    // Show a loading indicator while checking auth state
+    return <Button variant="ghost" disabled size="sm"><Loader2 className="h-4 w-4 animate-spin" /></Button>;
   }
 
   if (user) {
+    // User is logged in, show avatar and dropdown
     return (
        <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -96,10 +82,6 @@ export function AuthDisplay() {
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           {/* Add other menu items here if needed (e.g., Profile, Settings) */}
-           {/* <DropdownMenuItem>
-               <User className="mr-2 h-4 w-4" />
-               <span>Profile</span>
-           </DropdownMenuItem> */}
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer">
              <LogOut className="mr-2 h-4 w-4" />
@@ -117,6 +99,7 @@ export function AuthDisplay() {
             <LogIn className="mr-2 h-4 w-4" />
             Sign In
         </Button>
+        {/* Pass user state to potentially close modal on successful sign-in */}
         <SignInModal isOpen={isModalOpen} onOpenChange={setIsModalOpen} />
      </>
   );

@@ -1,87 +1,85 @@
 
 "use client";
 
-import { useState, useEffect, useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { handleClickAction } from '@/app/actions/click-actions';
+import { handleClickAction, ClickActionResult } from '@/app/actions/click-actions'; // Import result type
 import { Loader2, Zap } from 'lucide-react'; // Zap for click icon
+import { useAuth } from '@/hooks/use-auth'; // Import useAuth hook
 
 interface ClickButtonProps {
-  initialQuota: number;
+  remainingQuota: number; // Receive quota as a prop
+  onSuccess: (result: ClickActionResult) => void; // Callback on successful click
 }
 
-export function ClickButton({ initialQuota }: ClickButtonProps) {
-  const [remainingQuota, setRemainingQuota] = useState(initialQuota);
+export function ClickButton({ remainingQuota, onSuccess }: ClickButtonProps) {
+  // No local quota state needed, use the prop directly
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
+  const { user } = useAuth(); // Get user from auth hook
 
-  // Ensure initial quota is set on mount to avoid hydration mismatch
-  useEffect(() => {
-    setRemainingQuota(initialQuota);
-  }, [initialQuota]);
+  // No useEffect needed for initialQuota
 
   const handleButtonClick = async () => {
-    if (remainingQuota <= 0 || isLoading || isPending) {
-      // Keep toast for inability to click
-      toast({
-        title: "無法點擊 (Cannot Click)",
-        description: remainingQuota <= 0 ? "您今天的點擊次數已用完。(Your clicks for today are used up.)" : "請稍候再試。(Please wait and try again.)",
-        variant: "destructive",
-      });
+    if (!user) {
+      toast({ title: "請先登入 (Please Log In)", description: "您需要登入才能點擊。(You need to be logged in to click.)", variant: "destructive" });
       return;
+    }
+
+    if (remainingQuota <= 0 || isLoading || isPending) {
+        // Don't show toast here if we only want winner toasts or quota messages
+        // (Quota message is shown below the button)
+        return;
     }
 
     setIsLoading(true); // Indicate loading state visually
 
     startTransition(async () => {
       try {
-        const result = await handleClickAction();
+        // Pass the user ID to the server action
+        const result = await handleClickAction(user.uid);
 
-        if (result.success) {
-          // Ensure quota doesn't visually go below 0 if multiple clicks happen before state update
-          setRemainingQuota((prev) => Math.max(0, prev - 1));
+        onSuccess(result); // Call the parent callback with the result
 
-          // Only show a toast if a reward was won
-          if (result.rewardWon && result.rewardWon > 0) {
+        // Only show a toast if a reward was won
+        if (result.success && result.rewardWon && result.rewardWon > 0) {
             const toastTitle = "恭喜！(Congratulations!)";
             // Use the specific win message from the server action, or a fallback
             const toastDescription = result.message || `您贏得了 $${result.rewardWon}! (You won $${result.rewardWon}!)`;
             toast({
-              title: toastTitle,
-              description: toastDescription,
+            title: toastTitle,
+            description: toastDescription,
             });
-          }
-          // No toast for regular successful clicks without a reward
-
-        } else {
-          // Keep toast for failed clicks
-          toast({
-            title: "點擊失敗 (Click Failed)",
-            description: result.error || "發生未知錯誤。(An unknown error occurred.)",
-            variant: "destructive",
-          });
-          // If the server says the quota was actually 0, sync the state
-          if (result.error?.includes("quota")) {
-             setRemainingQuota(0);
-          }
+        } else if (!result.success && result.error) {
+           // Show error toast only if an error message exists (e.g., quota exceeded)
+           // Avoid showing generic failure toasts unless necessary.
+           // The quota message below the button handles the quota case.
+           if (result.error !== "用戶每日點擊次數已用完 (User daily click quota exhausted).") {
+               toast({
+                 title: "點擊失敗 (Click Failed)",
+                 description: result.error,
+                 variant: "destructive",
+               });
+           }
         }
       } catch (error) {
         console.error("Click action error:", error);
-        // Keep toast for unexpected errors
-        toast({
-          title: "點擊時發生錯誤 (Error During Click)",
-          description: "請稍後再試。(Please try again later.)",
-          variant: "destructive",
-        });
+         // Show toast for unexpected errors (optional)
+         toast({
+           title: "點擊時發生錯誤 (Error During Click)",
+           description: "請稍後再試。(Please try again later.)",
+           variant: "destructive",
+         });
       } finally {
         setIsLoading(false); // Reset loading state
       }
     });
   };
 
-  const isDisabled = remainingQuota <= 0 || isLoading || isPending;
+   // Disable button if not logged in, quota is zero, or processing
+  const isDisabled = !user || remainingQuota <= 0 || isLoading || isPending;
 
   return (
     <div className="flex flex-col items-center gap-4">
@@ -101,12 +99,14 @@ export function ClickButton({ initialQuota }: ClickButtonProps) {
         {isLoading || isPending ? '處理中... (Processing...)' : '點擊我! (Click Me!)'}
       </Button>
       <p className="text-sm text-muted-foreground">
-        剩餘點擊次數 (Clicks Remaining): {remainingQuota}
+        剩餘點擊次數 (Clicks Remaining): {user ? remainingQuota : '-'} {/* Show '-' if not logged in */}
       </p>
-       {remainingQuota <= 0 && (
+       {user && remainingQuota <= 0 && (
          <p className="text-sm text-accent-foreground font-semibold">今天次數已用完，明天再來！(Clicks used up for today, come back tomorrow!)</p>
+       )}
+       {!user && (
+            <p className="text-sm text-accent-foreground">登入後即可查看剩餘次數。(Log in to see remaining clicks.)</p>
        )}
     </div>
   );
 }
-
