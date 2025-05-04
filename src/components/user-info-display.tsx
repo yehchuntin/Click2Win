@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { User, Users, CheckCircle } from "lucide-react"; // Added CheckCircle
+import { User, Users, CheckCircle, LogIn } from "lucide-react"; // Added CheckCircle, LogIn
 import type { UserAccount } from "@/services/account"; // Import the Firestore UserAccount type
+import { Button } from "@/components/ui/button"; // Import Button
+import Link from "next/link"; // Import Link
 
 interface UserInfoDisplayProps {
   userAccount: UserAccount | null; // Accept the full UserAccount object or null
@@ -49,7 +51,14 @@ export function UserInfoDisplay({ userAccount }: UserInfoDisplayProps) {
              </div> */}
            </>
          ) : (
-           <p className="text-sm text-muted-foreground text-center pt-4">請先登入 (Please Log In)</p>
+            <div className="flex justify-center pt-4">
+                 <Button asChild variant="outline" size="sm">
+                     <Link href="/signin">
+                         <LogIn className="mr-2 h-4 w-4" />
+                         前往登入 (Sign In)
+                     </Link>
+                 </Button>
+            </div>
          )}
       </CardContent>
     </Card>
