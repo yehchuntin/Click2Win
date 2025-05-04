@@ -28,14 +28,28 @@ export function GlobalInfoDisplay({ initialData }: GlobalInfoDisplayProps) {
       setError(null);
       try {
         const response = await fetch('/api/global'); // Fetch from the new API endpoint
+
         if (!response.ok) {
-           throw new Error(`Failed to fetch global info: ${response.statusText}`);
+           // Try to get the specific error message from the API response body
+           let errorMsg = `Failed to fetch global info: ${response.statusText}`;
+           try {
+               const errorData = await response.json();
+               if (errorData.error) {
+                   errorMsg = errorData.error; // Use the specific error from the API
+               }
+           } catch (jsonError) {
+               // Ignore if response body is not JSON or parsing fails
+               console.error("Could not parse error response JSON:", jsonError);
+           }
+           throw new Error(errorMsg); // Throw the potentially more specific error
         }
+
         const data: GlobalInfoData = await response.json();
         setGlobalInfo(data);
       } catch (err: any) {
         console.error("Error fetching global info:", err);
-        setError("無法載入全球資訊。(Could not load global info.)");
+        // Set the error state with the message (could be generic or specific from API)
+        setError(err.message || "無法載入全球資訊。(Could not load global info.)");
       } finally {
         setIsLoading(false);
       }
@@ -57,7 +71,8 @@ export function GlobalInfoDisplay({ initialData }: GlobalInfoDisplayProps) {
         return <div className="flex items-center justify-center h-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
     }
     if (error) {
-      return <p className="text-xs text-destructive text-center h-20 flex items-center justify-center">{error}</p>;
+      // Display the specific error message caught
+      return <p className="text-xs text-destructive text-center h-20 flex items-center justify-center px-4">{error}</p>;
     }
     if (globalInfo) {
         const clicksToGo = Math.max(0, globalInfo.nextRewardThreshold - globalInfo.totalClicks);

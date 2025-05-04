@@ -14,8 +14,10 @@ interface GlobalInfoResponse {
 export async function GET(request: Request) {
     // Check if Firebase Admin SDK is initialized first
     if (!isAdminSdkInitialized()) {
-        console.error('Error in /api/global: Firebase Admin SDK is not initialized. Check server environment variables (FIREBASE_SERVICE_ACCOUNT_JSON).');
-        return NextResponse.json({ error: 'Internal Server Error: Server configuration issue.' }, { status: 500 });
+        const errorMessage = 'Server configuration incomplete. Firebase Admin SDK not initialized. Check server environment variables (FIREBASE_SERVICE_ACCOUNT_JSON).';
+        console.error(`Error in /api/global: ${errorMessage}`);
+        // Return a specific error response indicating the configuration issue
+        return NextResponse.json({ error: errorMessage }, { status: 503 }); // 503 Service Unavailable is appropriate
     }
 
     try {
