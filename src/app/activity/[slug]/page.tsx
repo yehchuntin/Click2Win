@@ -1,7 +1,7 @@
 'use client';
 
-import { useParams } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useParams, useRouter } from 'next/navigation'; // Added useRouter
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -9,158 +9,179 @@ import { useToast } from '@/hooks/use-toast';
 import { ArrowLeft, Gift, Info, Link as LinkIcon, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useAuth } from '@/hooks/use-auth'; // Import useAuth
+import { Separator } from '@/components/ui/separator'; // Import Separator
 
-// Mock data structure for sponsor activities - replace with actual data fetching
-interface SponsorActivity {
-  slug: string;
-  name: string;
-  description: string;
-  sponsorName: string;
-  sponsorLogoUrl: string; // Placeholder for sponsor logo
-  sponsorWebsite: string;
-  imageUrl: string; // Main activity image
-  rewardType: 'coupon' | 'discount' | 'entry' | 'physical';
-  rewardDescription: string;
-  clicksRequired: number;
-  userProgress?: number; // User's current clicks for this activity (fetch per user)
-  isCompleted?: boolean; // Has the user completed this activity?
+// Interfaces matching API structures
+interface ActivityDefinition {
+    id: string;
+    name: string;
+    description: string;
+    clicksRequired: number;
+    reward: { type: string; amount: number | string; };
+    sponsorName?: string; // Optional fields from previous mock
+    sponsorLogoUrl?: string;
+    sponsorWebsite?: string;
+    imageUrl?: string;
 }
 
-// Mock function to fetch activity details - replace with API call
-async function fetchActivityDetails(slug: string): Promise<SponsorActivity | null> {
-    console.log(`Fetching activity details for slug: ${slug}`);
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // In a real app, fetch from your backend/database based on the slug
-    const MOCK_ACTIVITIES: SponsorActivity[] = [
-        {
-            slug: 'sponsor-a-event',
-            name: '點擊挑戰賽 A (Click Challenge A)',
-            description: '完成 50 次點擊即可獲得合作夥伴 A 提供的獨家 $10 折價券！適用於所有線上商品。 (Complete 50 clicks to get an exclusive $10 coupon from Partner A! Valid on all online products.)',
-            sponsorName: '合作夥伴 A (Partner A)',
-            sponsorLogoUrl: 'https://picsum.photos/seed/sponsorA/40/40', // Placeholder
-            sponsorWebsite: 'https://example.com/sponsor-a',
-            imageUrl: 'https://picsum.photos/seed/activityA/600/400', // Placeholder
-            rewardType: 'coupon',
-            rewardDescription: '$10 折價券 ($10 Coupon)',
-            clicksRequired: 50,
-            userProgress: 23, // Example user progress
-            isCompleted: false,
-        },
-         {
-            slug: 'sponsor-b-draw',
-            name: '幸運抽獎 B (Lucky Draw B)',
-            description: '累積 100 次點擊，參加合作夥伴 B 提供的最新產品抽獎！點擊越多，機會越大！(Accumulate 100 clicks to enter the lucky draw for Partner B\'s latest product! More clicks, more chances!)',
-            sponsorName: '合作夥伴 B (Partner B)',
-            sponsorLogoUrl: 'https://picsum.photos/seed/sponsorB/40/40', // Placeholder
-            sponsorWebsite: 'https://example.com/sponsor-b',
-            imageUrl: 'https://picsum.photos/seed/activityB/600/400', // Placeholder
-            rewardType: 'entry',
-            rewardDescription: '抽獎機會 (Draw Entry)',
-            clicksRequired: 100,
-            userProgress: 78, // Example user progress
-            isCompleted: false,
-        },
-         // Add more mock activities
-    ];
-
-    const activity = MOCK_ACTIVITIES.find(act => act.slug === slug);
-    console.log("Found activity:", activity);
-    return activity || null;
+interface UserActivityProgress {
+    uid: string;
+    activityId: string;
+    clicks: number;
+    clicksRequired: number;
+    completed: boolean;
+    rewardClaimed: boolean;
+    activityName?: string;
+    reward?: { type: string; amount: number | string; } | null;
 }
 
-// Mock function to simulate clicking the activity button - replace with server action
-async function handleActivityClick(slug: string, currentProgress: number): Promise<{ success: boolean; newProgress: number; error?: string; rewardWon?: boolean }> {
-    console.log(`Handling click for activity: ${slug}, current progress: ${currentProgress}`);
-    await new Promise(resolve => setTimeout(resolve, 300)); // Simulate network delay
+// --- API Interaction Functions ---
 
-    // In a real app:
-    // 1. Verify user authentication
-    // 2. Check if user has clicks available (if linked to global quota, or activity-specific quota)
-    // 3. Increment progress in the database for this user and activity
-    // 4. Check if the required clicks are met
-    // 5. If met, mark as completed, potentially grant reward (or flag for claiming)
+// Fetch activity definition and user progress together
+async function fetchActivityStatus(activityId: string, uid: string): Promise<UserActivityProgress | null> {
+    console.log(`Fetching activity status for activity: ${activityId}, user: ${uid}`);
+    try {
+        const response = await fetch(`/api/activity/${activityId}/status?uid=${uid}`);
+        if (!response.ok) {
+            if (response.status === 404) {
+                 console.warn(`Activity definition or progress not found for ${activityId}`);
+                 return null; // Treat as not found
+            }
+            throw new Error(`Failed to fetch activity status: ${response.statusText}`);
+        }
+        const data: UserActivityProgress = await response.json();
+        console.log("Received activity status:", data);
+        return data;
+    } catch (error) {
+        console.error("Error fetching activity status:", error);
+        throw error; // Re-throw to be caught by caller
+    }
+}
 
-    const activity = await fetchActivityDetails(slug); // Refetch details to get clicksRequired
-    if (!activity) return { success: false, newProgress: currentProgress, error: 'Activity not found.' };
 
-    const newProgress = currentProgress + 1;
-    const rewardWon = newProgress >= activity.clicksRequired;
+// Call API to record an activity click
+async function handleActivityClickApi(activityId: string, uid: string): Promise<{ success: boolean; clicks?: number; completed?: boolean; error?: string; reward?: any | null }> {
+    console.log(`Handling activity click via API for activity: ${activityId}, user: ${uid}`);
+    try {
+        const response = await fetch('/api/activity-click', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid, activityId }),
+        });
 
-    // TODO: Update actual user progress in the backend here
+        const result = await response.json();
 
-    console.log(`Click success. New progress: ${newProgress}. Reward won: ${rewardWon}`);
-    return { success: true, newProgress: newProgress, rewardWon: rewardWon };
+        if (!response.ok) {
+             return { success: false, error: result.error || `API Error: ${response.status}` };
+        }
+
+         console.log("Activity click API response:", result);
+         return {
+            success: result.success,
+            clicks: result.clicks,
+            completed: result.completed,
+            reward: result.reward, // Pass reward info if just completed
+            error: result.error,
+         };
+
+    } catch (error) {
+        console.error("Error calling activity click API:", error);
+        return { success: false, error: 'Network error or failed to reach server.' };
+    }
 }
 
 
 export default function ActivityPage() {
   const params = useParams();
-  const slug = params.slug as string;
-  const [activity, setActivity] = useState<SponsorActivity | null>(null);
+  const router = useRouter();
+  const slug = params.slug as string; // Activity ID is the slug
+  const { user, loading: authLoading } = useAuth(); // Use auth hook
+  const [activityStatus, setActivityStatus] = useState<UserActivityProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [clicking, setClicking] = useState(false);
-  const [userProgress, setUserProgress] = useState(0);
-   const [isCompleted, setIsCompleted] = useState(false);
   const { toast } = useToast();
 
+  // Get user ID (from auth context or potentially localStorage fallback)
+  const uid = user?.uid;
+
+  const loadData = useCallback(async () => {
+       if (!uid || !slug) {
+           // If no user or no slug, stop loading and potentially redirect or show message
+           if (!authLoading && !uid) {
+               toast({ title: '未登入 (Not Logged In)', description: '請先登入以查看活動詳情。(Please log in to view activity details.)', variant: 'destructive' });
+               router.push('/signin?next=/activity/' + slug); // Redirect to signin
+           }
+           setLoading(false);
+           return;
+       }
+
+       setLoading(true);
+       try {
+           const data = await fetchActivityStatus(slug, uid);
+           if (data) {
+               setActivityStatus(data);
+           } else {
+               toast({ title: '錯誤 (Error)', description: '找不到此活動或您的進度。(Activity or your progress not found.)', variant: 'destructive' });
+               // Optionally redirect to home or a 404 page
+               // router.push('/');
+           }
+       } catch (error) {
+           console.error("Error loading activity status:", error);
+           toast({ title: '錯誤 (Error)', description: '無法載入活動詳情。(Failed to load activity details.)', variant: 'destructive' });
+       } finally {
+           setLoading(false);
+       }
+   }, [uid, slug, toast, authLoading, router]); // Include dependencies
+
   useEffect(() => {
-    if (slug) {
-      setLoading(true);
-      fetchActivityDetails(slug)
-        .then(data => {
-          if (data) {
-            setActivity(data);
-            // Initialize user progress and completion status from fetched data
-             setUserProgress(data.userProgress || 0);
-             setIsCompleted(data.isCompleted || (data.userProgress || 0) >= data.clicksRequired);
-          } else {
-              // Handle activity not found (e.g., show a 404-like message or redirect)
-              toast({ title: '錯誤 (Error)', description: '找不到此活動。(Activity not found.)', variant: 'destructive' });
-          }
-        })
-        .catch(error => {
-          console.error("Error fetching activity details:", error);
-          toast({ title: '錯誤 (Error)', description: '無法載入活動詳情。(Failed to load activity details.)', variant: 'destructive' });
-        })
-        .finally(() => setLoading(false));
+    // Load data when component mounts or when user/slug changes, after auth check
+    if (!authLoading) {
+         loadData();
     }
-  }, [slug, toast]);
+  }, [authLoading, loadData]); // Run effect when auth loading finishes or loadData changes
+
 
   const handleClick = async () => {
-    if (!activity || clicking || isCompleted) return;
+    if (!activityStatus || clicking || activityStatus.completed || !uid) return;
 
     setClicking(true);
     try {
-      const result = await handleActivityClick(slug, userProgress);
+      const result = await handleActivityClickApi(slug, uid);
       if (result.success) {
-        setUserProgress(result.newProgress);
-         const completed = result.newProgress >= activity.clicksRequired;
-         setIsCompleted(completed);
+         // Update local state optimistically or refetch
+         setActivityStatus(prev => prev ? {
+             ...prev,
+             clicks: result.clicks ?? prev.clicks, // Use new clicks from API
+             completed: result.completed ?? prev.completed, // Use new completed status
+             // Reward claimed status might need another fetch or be part of API response
+         } : null);
 
-        if (completed && !isCompleted) { // Check if it just became completed
+
+        if (result.completed && !activityStatus.completed) { // Check if it *just* became completed based on API result
            toast({
             title: '任務完成！(Task Complete!)',
-            description: `您已完成 ${activity.name}！獎勵：${activity.rewardDescription} (You have completed ${activity.name}! Reward: ${activity.rewardDescription})`,
+            description: `您已完成 ${activityStatus.activityName || slug}！獎勵：${activityStatus.reward?.amount || '獎勵'} (You have completed ${activityStatus.activityName || slug}! Reward: ${activityStatus.reward?.amount || 'Reward'})`,
            });
-           // TODO: Add logic to actually grant/claim the reward here or enable a claim button
+           // Optionally refetch status to confirm reward claimed status etc.
+           // await loadData();
         }
         // Optional: Show progress toast
-        // toast({ title: '點擊成功 (Click Successful)', description: `進度 (Progress): ${result.newProgress}/${activity.clicksRequired}` });
+        // toast({ title: '點擊成功 (Click Successful)', description: `進度 (Progress): ${result.clicks}/${activityStatus.clicksRequired}` });
 
       } else {
         toast({ title: '點擊失敗 (Click Failed)', description: result.error || '發生錯誤 (An error occurred)', variant: 'destructive' });
       }
     } catch (error) {
-      console.error("Error handling activity click:", error);
+      console.error("Error handling activity click API call:", error);
       toast({ title: '點擊錯誤 (Click Error)', description: '請稍後再試 (Please try again later)', variant: 'destructive' });
     } finally {
       setClicking(false);
     }
   };
 
-  if (loading) {
+  // --- Loading and Not Found States ---
+  if (loading || authLoading) {
     return (
       <div className="container mx-auto flex min-h-[calc(100vh-var(--header-height))] items-center justify-center p-4">
          <Loader2 className="h-16 w-16 animate-spin text-primary" />
@@ -168,11 +189,27 @@ export default function ActivityPage() {
     );
   }
 
-  if (!activity) {
+  if (!uid && !authLoading) {
+      // Already handled by useEffect redirecting, but keep a fallback message
+       return (
+         <div className="container mx-auto flex min-h-[calc(100vh-var(--header-height))] flex-col items-center justify-center p-4 text-center">
+           <h1 className="text-2xl font-semibold text-destructive mb-4">需要登入 (Login Required)</h1>
+           <p className="text-muted-foreground mb-6">請先登入以繼續。(Please log in to continue.)</p>
+           <Button asChild variant="outline">
+             <Link href={`/signin?next=/activity/${slug}`}>
+               前往登入 (Go to Login)
+             </Link>
+           </Button>
+         </div>
+       );
+   }
+
+
+  if (!activityStatus && !loading) {
     return (
       <div className="container mx-auto flex min-h-[calc(100vh-var(--header-height))] flex-col items-center justify-center p-4 text-center">
         <h1 className="text-2xl font-semibold text-destructive mb-4">活動不存在 (Activity Not Found)</h1>
-        <p className="text-muted-foreground mb-6">您尋找的活動頁面不存在或已被移除。(The activity page you are looking for does not exist or has been removed.)</p>
+        <p className="text-muted-foreground mb-6">您尋找的活動頁面不存在或無法載入。(The activity page does not exist or could not be loaded.)</p>
          <Button asChild variant="outline">
            <Link href="/">
              <ArrowLeft className="mr-2 h-4 w-4" /> 返回首頁 (Back to Home)
@@ -181,8 +218,19 @@ export default function ActivityPage() {
       </div>
     );
   }
+  // --- Render Activity Details ---
+  // Use data from activityStatus
+  const progressPercentage = Math.min(100, (activityStatus.clicks / activityStatus.clicksRequired) * 100);
+  const isCompleted = activityStatus.completed;
+  const activityName = activityStatus.activityName || slug;
+  const rewardDescription = activityStatus.reward ? `${activityStatus.reward.amount} ${activityStatus.reward.type}` : '獎勵 (Reward)';
 
-  const progressPercentage = Math.min(100, (userProgress / activity.clicksRequired) * 100);
+  // Placeholder details - ideally fetch these with activity definition
+  const imageUrl = `https://picsum.photos/seed/${slug}/600/400`;
+  const sponsorName = "合作夥伴 (Partner)"; // Replace with actual data if available
+  const sponsorLogoUrl = `https://picsum.photos/seed/${slug}logo/40/40`;
+  const sponsorWebsite = "#"; // Replace with actual data
+
 
   return (
     <div className="container mx-auto max-w-4xl p-4 md:p-8">
@@ -195,23 +243,25 @@ export default function ActivityPage() {
       <Card className="overflow-hidden shadow-lg border-border/60">
          <CardHeader className="relative p-0">
              <Image
-                 src={activity.imageUrl}
-                 alt={activity.name}
+                 // Use placeholder image logic or fetch from definition
+                 src={imageUrl}
+                 alt={activityName}
                  width={800}
                  height={400}
                  className="w-full h-48 md:h-64 object-cover"
                  data-ai-hint="activity banner promotion"
              />
-            {/* Overlay or Title on image can go here */}
          </CardHeader>
          <CardContent className="p-6">
-           <CardTitle className="text-2xl md:text-3xl font-bold mb-2">{activity.name}</CardTitle>
-           <CardDescription className="text-muted-foreground mb-4">{activity.description}</CardDescription>
+           <CardTitle className="text-2xl md:text-3xl font-bold mb-2">{activityName}</CardTitle>
+           {/* Add description from activityDefinition if available */}
+           <CardDescription className="text-muted-foreground mb-4">完成 {activityStatus.clicksRequired.toLocaleString()} 次點擊即可獲得 {rewardDescription}！ (Complete {activityStatus.clicksRequired.toLocaleString()} clicks to get {rewardDescription}!)</CardDescription>
 
+            {/* Sponsor Info - Replace with actual data */}
            <div className="flex items-center space-x-2 mb-4 text-sm text-muted-foreground">
-             <Image src={activity.sponsorLogoUrl} alt={`${activity.sponsorName} logo`} width={24} height={24} className="rounded-full" data-ai-hint="company logo"/>
-             <span>由 <a href={activity.sponsorWebsite} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{activity.sponsorName}</a> 贊助</span>
-             <a href={activity.sponsorWebsite} target="_blank" rel="noopener noreferrer" aria-label={`Visit ${activity.sponsorName} website`}>
+             <Image src={sponsorLogoUrl} alt={`${sponsorName} logo`} width={24} height={24} className="rounded-full" data-ai-hint="company logo"/>
+             <span>由 <a href={sponsorWebsite} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{sponsorName}</a> 贊助</span>
+             <a href={sponsorWebsite} target="_blank" rel="noopener noreferrer" aria-label={`Visit ${sponsorName} website`}>
                 <LinkIcon className="h-4 w-4 text-primary hover:text-primary/80"/>
              </a>
            </div>
@@ -222,7 +272,7 @@ export default function ActivityPage() {
              <h3 className="text-lg font-semibold mb-2">活動獎勵 (Activity Reward)</h3>
              <div className="flex items-center space-x-2 p-3 bg-accent/50 rounded-md border border-accent">
                  <Gift className="h-5 w-5 text-primary" />
-                 <span className="text-accent-foreground font-medium">{activity.rewardDescription}</span>
+                 <span className="text-accent-foreground font-medium">{rewardDescription}</span>
              </div>
            </div>
 
@@ -230,13 +280,13 @@ export default function ActivityPage() {
              <h3 className="text-lg font-semibold mb-2">您的進度 (Your Progress)</h3>
              <Progress value={progressPercentage} className="w-full h-3 mb-1" />
              <p className="text-sm text-muted-foreground text-right">
-                {userProgress.toLocaleString()} / {activity.clicksRequired.toLocaleString()} 次點擊 (Clicks)
+                {activityStatus.clicks.toLocaleString()} / {activityStatus.clicksRequired.toLocaleString()} 次點擊 (Clicks)
              </p>
            </div>
 
            <Button
              onClick={handleClick}
-             disabled={clicking || isCompleted}
+             disabled={clicking || isCompleted || !uid} // Disable if clicking, completed, or not logged in
              size="lg"
              className="w-full text-lg font-semibold"
            >
@@ -252,9 +302,14 @@ export default function ActivityPage() {
          </CardContent>
          <CardFooter className="bg-muted/50 p-4 text-xs text-muted-foreground">
              <Info className="h-4 w-4 mr-2" />
-             每個點擊都會計入您的進度。完成後即可領取獎勵。(Each click counts towards your progress. Claim your reward upon completion.)
+             {isCompleted ? '您已完成此活動。(You have completed this activity.)' : '每個點擊都會計入您的進度。完成後即可領取獎勵。(Each click counts towards your progress. Claim your reward upon completion.)'}
          </CardFooter>
       </Card>
     </div>
   );
 }
+
+// Remove mock data and functions (fetchActivityDetails, handleActivityClick)
+// const MOCK_ACTIVITIES...
+// async function fetchActivityDetails...
+// async function handleActivityClick...

@@ -1,173 +1,195 @@
-import { calculateDailyQuota, MAX_DAILY_REFERRAL_BONUS_COUNT, calculateReferralBonus } from "@/lib/reward-logic";
-import { getGlobalClickCount } from "./reward";
-import { getCurrentRewardTarget } from "@/lib/reward-logic";
+import { db, isAdminSdkInitialized } from '@/lib/firebase/server'; // Use server db for backend logic
+import { FieldValue } from 'firebase-admin/firestore'; // Use FieldValue for atomic operations
 
 /**
- * Represents a user account with necessary information for click tracking and rewards.
+ * Represents a user account structure in Firestore.
  */
 export interface UserAccount {
   /**
-   * The unique identifier for the user.
+   * The unique identifier for the user (matches Firebase Auth UID).
    */
-  userId: string;
+  uid: string; // Changed from userId to uid to match Firebase Auth
   /**
-   * The number of remaining clicks available to the user today.
+   * User's email address.
    */
-  dailyClickQuota: number;
+  email?: string;
   /**
-   * The total number of referrals the user has made.
+   * User's display name.
    */
-  referralCount: number;
-   /**
-    * The number of referral bonuses claimed today.
-    */
-   referralsClaimedToday: number;
+  displayName?: string;
+  /**
+   * The number of clicks the user has made today.
+   */
+  todayClicks: number;
+  /**
+   * The maximum number of clicks allowed for the user today.
+   */
+  dailyQuota: number;
+  /**
+   * The total number of clicks the user has ever made.
+   */
+  totalClicks: number;
+  /**
+   * An array to store rewards earned by the user.
+   * Define a Reward interface if needed.
+   */
+  rewards: any[]; // Define a specific Reward type later
 }
 
-// --- Mock Database ---
-// In a real app, this would be Firestore, Supabase, etc.
-const MOCK_USER_DB: Record<string, UserAccount> = {
-  "test-user": { // Pre-existing test user
-    userId: "test-user",
-    dailyClickQuota: 0, // Will be calculated dynamically
-    referralCount: 2,
-    referralsClaimedToday: 1,
-  },
-};
-// ---------------------
+const DEFAULT_DAILY_QUOTA = 50;
 
-// Track last reset time (simple in-memory version)
-const lastResetTimes: Record<string, number> = {}; // Stores last reset timestamp (ms) per user
+// --- Firestore Operations ---
 
 /**
- * Simulates resetting daily quotas and referral claims at midnight.
- * In a real app, this would be a cron job or scheduled function.
+ * Gets a reference to the users collection in Firestore.
+ * Throws an error if Firestore is not initialized.
  */
-async function simulateDailyReset(userId: string, forceReset = false): Promise<void> {
-    const now = Date.now();
-    const lastReset = lastResetTimes[userId] || 0;
-    const todayStart = new Date().setHours(0, 0, 0, 0); // Timestamp for start of today
+function getUsersCollection() {
+    if (!isAdminSdkInitialized() || !db) {
+        throw new Error("Firestore is not initialized on the server.");
+    }
+    return db.collection('users');
+}
 
-    // Reset if it's a new day or forceReset is true
-    if (forceReset || lastReset < todayStart) {
-        if (MOCK_USER_DB[userId]) {
-            // Recalculate quota based on current reward target
-            const globalClickCount = await getGlobalClickCount(); // Fetch fresh count
-            const currentReward = getCurrentRewardTarget(globalClickCount);
-            MOCK_USER_DB[userId].dailyClickQuota = calculateDailyQuota(currentReward.amount);
-            MOCK_USER_DB[userId].referralsClaimedToday = 0;
-            lastResetTimes[userId] = now; // Update last reset time
-            console.log(`Simulated daily reset for ${userId}: Quota=${MOCK_USER_DB[userId].dailyClickQuota}`);
+/**
+ * Ensures a user document exists in Firestore, creating a default entry if not.
+ * This is often called after a successful sign-in or when accessing user data.
+ *
+ * @param uid The Firebase Auth UID of the user.
+ * @param email The user's email (optional, for initial creation).
+ * @param displayName The user's display name (optional, for initial creation).
+ * @returns A promise that resolves when the user document exists.
+ * @throws Error if Firestore operation fails.
+ */
+export async function ensureUserExists(uid: string, email?: string, displayName?: string): Promise<void> {
+    const usersCollection = getUsersCollection();
+    const userRef = usersCollection.doc(uid);
+
+    try {
+        const userSnap = await userRef.get();
+
+        if (!userSnap.exists) {
+            console.log(`User ${uid} not found in Firestore, creating default entry.`);
+            const newUser: UserAccount = {
+                uid: uid,
+                email: email || '',
+                displayName: displayName || 'Anonymous User',
+                todayClicks: 0,
+                dailyQuota: DEFAULT_DAILY_QUOTA,
+                totalClicks: 0,
+                rewards: [],
+            };
+            await userRef.set(newUser);
+            console.log(`User ${uid} created in Firestore.`);
+        } else {
+            // Optional: Update email/displayName if they've changed since last login
+            const updates: Partial<UserAccount> = {};
+            const existingData = userSnap.data() as UserAccount | undefined;
+            if (email && existingData?.email !== email) updates.email = email;
+            if (displayName && existingData?.displayName !== displayName) updates.displayName = displayName;
+            if (Object.keys(updates).length > 0) {
+                 await userRef.update(updates);
+                 console.log(`Updated basic info for user ${uid}.`);
+            }
+            // Note: Daily reset logic is handled by the scheduled function now.
         }
-    }
-}
-
-/**
- * Ensures a user exists in the database, creating a default entry if not.
- * This is often called after a successful sign-in.
- *
- * @param userId The ID of the user to check/create.
- * @returns A promise that resolves when the user exists.
- */
-export async function ensureUserExists(userId: string): Promise<void> {
-    if (!MOCK_USER_DB[userId]) {
-        console.log(`User ${userId} not found, creating default entry.`);
-        MOCK_USER_DB[userId] = {
-            userId: userId,
-            dailyClickQuota: 0, // Will be set by simulateDailyReset
-            referralCount: 0,
-            referralsClaimedToday: 0,
-        };
-        await simulateDailyReset(userId, true); // Force initial calculation
-    }
-    // If user already exists, ensure their daily state is up-to-date
-    else {
-        await simulateDailyReset(userId);
+    } catch (error) {
+        console.error(`Error ensuring user ${uid} exists in Firestore:`, error);
+        throw new Error(`Failed to ensure user ${uid} exists.`);
     }
 }
 
 
 /**
- * Asynchronously retrieves a user account by ID.
- * Ensures daily state is updated before returning.
+ * Asynchronously retrieves a user account by UID from Firestore.
  *
- * @param userId The ID of the user account to retrieve.
- * @returns A promise that resolves to a UserAccount object.
- * @throws Error if the user cannot be found or created.
+ * @param uid The Firebase Auth UID of the user account to retrieve.
+ * @returns A promise that resolves to a UserAccount object or null if not found.
+ * @throws Error if Firestore operation fails.
  */
-export async function getUserAccount(userId: string): Promise<UserAccount> {
-  console.log(`Attempting to get account for: ${userId}`);
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 50));
+export async function getUserAccount(uid: string): Promise<UserAccount | null> {
+    console.log(`Attempting to get Firestore account for: ${uid}`);
+    const usersCollection = getUsersCollection();
+    const userRef = usersCollection.doc(uid);
 
-  // Ensure user exists and daily state is updated
-  await ensureUserExists(userId);
+    try {
+        const userSnap = await userRef.get();
 
-  console.log("Current Mock DB state:", MOCK_USER_DB);
-
-  if (MOCK_USER_DB[userId]) {
-     console.log(`Returning account for ${userId}:`, MOCK_USER_DB[userId]);
-    return { ...MOCK_USER_DB[userId] }; // Return a copy
-  } else {
-    // This should ideally not happen due to ensureUserExists, but handle defensively
-    console.error(`Failed to find or create user account for userId: ${userId}`);
-    throw new Error(`User account could not be retrieved for userId: ${userId}`);
-  }
-}
-
-/**
- * Asynchronously updates a user's daily click quota.
- *
- * @param userId The ID of the user account to update.
- * @param newQuota The new daily click quota for the user.
- * @returns A promise that resolves when the quota is updated.
- */
-export async function updateUserDailyClickQuota(userId: string, newQuota: number): Promise<void> {
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 30));
-
-  // Ensure user exists before updating
-  await ensureUserExists(userId);
-
-  if (MOCK_USER_DB[userId]) {
-    MOCK_USER_DB[userId].dailyClickQuota = Math.max(0, newQuota); // Ensure quota doesn't go below 0
-    console.log(`Updated quota for ${userId} to ${MOCK_USER_DB[userId].dailyClickQuota}`);
-  } else {
-    console.warn(`User not found after ensure check, cannot update quota for ${userId}`);
-    // Optionally throw an error
-  }
-  return;
-}
-
-/**
- * Asynchronously increments a user's referral count and potentially grants bonus clicks.
- *
- * @param userId The ID of the user account (the referrer) to update.
- * @returns A promise that resolves when the referral count is incremented.
- */
-export async function incrementUserReferralCount(userId: string): Promise<void> {
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 40));
-
-  // Ensure user exists before updating
-  await ensureUserExists(userId);
-
-  if (MOCK_USER_DB[userId]) {
-    MOCK_USER_DB[userId].referralCount += 1;
-
-    // Check if daily referral bonus limit is reached
-    if (MOCK_USER_DB[userId].referralsClaimedToday < MAX_DAILY_REFERRAL_BONUS_COUNT) {
-      const bonusClicks = calculateReferralBonus();
-      MOCK_USER_DB[userId].dailyClickQuota += bonusClicks;
-      MOCK_USER_DB[userId].referralsClaimedToday += 1;
-      console.log(`Incremented referral count for ${userId} to ${MOCK_USER_DB[userId].referralCount}. Granted ${bonusClicks} bonus clicks. Quota now: ${MOCK_USER_DB[userId].dailyClickQuota}. Referrals claimed today: ${MOCK_USER_DB[userId].referralsClaimedToday}`);
-    } else {
-       console.log(`Incremented referral count for ${userId} to ${MOCK_USER_DB[userId].referralCount}. Daily bonus limit reached, no extra clicks granted.`);
+        if (userSnap.exists) {
+            const userData = userSnap.data() as UserAccount;
+            console.log(`Returning Firestore account for ${uid}:`, userData);
+            return userData;
+        } else {
+            console.log(`User ${uid} not found in Firestore.`);
+            // Optionally call ensureUserExists here if retrieval implies creation should happen
+            // await ensureUserExists(uid);
+            // const retrySnap = await userRef.get();
+            // if (retrySnap.exists) return retrySnap.data() as UserAccount;
+            return null; // Explicitly return null if not found after check
+        }
+    } catch (error) {
+        console.error(`Error getting user account ${uid} from Firestore:`, error);
+        throw new Error(`Failed to retrieve user account ${uid}.`);
     }
-
-  } else {
-    console.warn(`User not found after ensure check, cannot increment referral count for ${userId}`);
-    // Optionally throw an error
-  }
-  return;
 }
+
+// Functions like updateUserDailyClickQuota, incrementUserReferralCount
+// should now directly use Firestore updates (atomic increments etc.)
+// For example:
+export async function incrementUserClicks(uid: string): Promise<{ todayClicks: number; totalClicks: number }> {
+    const usersCollection = getUsersCollection();
+    const userRef = usersCollection.doc(uid);
+
+    try {
+        const updatedDoc = await db.runTransaction(async (transaction) => {
+            const userSnap = await transaction.get(userRef);
+            if (!userSnap.exists) {
+                throw new Error(`User ${uid} not found for click increment.`);
+            }
+            const userData = userSnap.data() as UserAccount;
+
+            // Check quota before incrementing
+            if (userData.todayClicks >= userData.dailyQuota) {
+                throw new Error("Daily quota exceeded.");
+            }
+
+            transaction.update(userRef, {
+                todayClicks: FieldValue.increment(1),
+                totalClicks: FieldValue.increment(1),
+            });
+
+            // Return the potentially updated values (after increment)
+             return {
+                 todayClicks: userData.todayClicks + 1,
+                 totalClicks: userData.totalClicks + 1,
+             };
+        });
+
+         console.log(`Incremented clicks for ${uid}. New counts: today=${updatedDoc.todayClicks}, total=${updatedDoc.totalClicks}`);
+         return updatedDoc;
+
+    } catch (error) {
+        console.error(`Error incrementing clicks for ${uid}:`, error);
+        if (error instanceof Error && error.message === "Daily quota exceeded.") {
+             throw error; // Re-throw specific error for handling
+        }
+        throw new Error(`Failed to increment clicks for user ${uid}.`);
+    }
+}
+
+// Placeholder for adding a reward to the user's array
+export async function addUserReward(uid: string, reward: any): Promise<void> {
+     const usersCollection = getUsersCollection();
+     const userRef = usersCollection.doc(uid);
+     try {
+         await userRef.update({
+             rewards: FieldValue.arrayUnion(reward) // Add reward atomically
+         });
+         console.log(`Added reward for user ${uid}:`, reward);
+     } catch (error) {
+         console.error(`Error adding reward for ${uid}:`, error);
+         throw new Error(`Failed to add reward for user ${uid}.`);
+     }
+}
+
+// Add other Firestore-based functions as needed (e.g., fetching leaderboard data)

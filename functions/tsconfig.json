@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "outDir": "lib",
+    "sourceMap": true,
+    "strict": true,
+    "target": "es2017",
+    "esModuleInterop": true, // Enable esModuleInterop
+    "skipLibCheck": true,   // Skip lib check for faster builds
+    "resolveJsonModule": true // Allow importing JSON files
+  },
+  "compileOnSave": true,
+  "include": [
+    "src"
+  ]
+}

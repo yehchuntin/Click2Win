@@ -32,9 +32,9 @@ function initializeFirebaseAdmin() {
 
 const app = initializeFirebaseAdmin();
 const auth = app ? admin.auth() : null;
-const db = app ? admin.firestore() : null; // Initialize Firestore if needed
+const db = app ? admin.firestore() : null; // Initialize Firestore
 
 // Function to check if the Admin SDK was successfully initialized
 export const isAdminSdkInitialized = (): boolean => !!app;
 
-export { auth, db }; // Export auth and db (or other services)
+export { auth, db }; // Export auth and db

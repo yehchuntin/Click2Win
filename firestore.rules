@@ -1,0 +1,41 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global state: Allow reads by anyone, writes only by admin/server
+    match /globals/{docId} {
+      allow read: if true; // Anyone can read global click count, etc.
+      allow write: if false; // Only backend/admin should write global state
+      // TODO: Secure this properly if using admin SDK bypasses rules
+    }
+
+    // Users: Allow user to read/write their own data. Disallow reading others' data.
+    match /users/{userId} {
+      allow read, update, delete: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      // Deny listing all users
+      allow list: if false;
+    }
+
+    // Activity Definitions: Allow anyone to read
+    match /activities/{activityId} {
+        allow read: if true;
+        allow write: if false; // Only admin/backend should define activities
+    }
+
+    // User Activity Progress: Allow user to read/write their own progress.
+    match /userActivityProgress/{progressId} {
+        // progressId is likely "{userId}_{activityId}"
+        allow read, create, update: if request.auth != null && request.auth.uid == progressId.split('_')[0];
+        allow delete: if false; // Generally don't allow deleting progress
+        // Deny listing all progress
+        allow list: if false;
+    }
+
+    // Default deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

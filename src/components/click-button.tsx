@@ -4,23 +4,32 @@
 import { useState, useTransition } from 'react';
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { handleClickAction, ClickActionResult } from '@/app/actions/click-actions'; // Import result type
+// Removed direct action import: import { handleClickAction, ClickActionResult } from '@/app/actions/click-actions';
 import { Loader2, Zap } from 'lucide-react'; // Zap for click icon
 import { useAuth } from '@/hooks/use-auth'; // Import useAuth hook
 
+// Define the expected API response structure based on the new API
+interface ClickApiResponse {
+    success: boolean;
+    message?: string;
+    error?: string;
+    totalClicks?: number; // Global total clicks
+    todayClicks?: number; // User's clicks today after this click
+    reward?: { type: string; amount: number | string }; // Reward details if won
+}
+
+
 interface ClickButtonProps {
   remainingQuota: number; // Receive quota as a prop
-  onSuccess: (result: ClickActionResult) => void; // Callback on successful click
+  // Callback prop to update parent state after successful API call
+  onSuccess: (apiResult: ClickApiResponse) => void;
 }
 
 export function ClickButton({ remainingQuota, onSuccess }: ClickButtonProps) {
-  // No local quota state needed, use the prop directly
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
   const { user } = useAuth(); // Get user from auth hook
-
-  // No useEffect needed for initialQuota
 
   const handleButtonClick = async () => {
     if (!user) {
@@ -29,8 +38,10 @@ export function ClickButton({ remainingQuota, onSuccess }: ClickButtonProps) {
     }
 
     if (remainingQuota <= 0 || isLoading || isPending) {
-        // Don't show toast here if we only want winner toasts or quota messages
-        // (Quota message is shown below the button)
+        // Optional: Show toast if clicking disabled due to quota
+        // if (remainingQuota <= 0) {
+        //    toast({ title: "次數用盡 (Quota Exhausted)", description: "今天次數已用完。(Clicks used up for today.)" });
+        // }
         return;
     }
 
@@ -38,38 +49,51 @@ export function ClickButton({ remainingQuota, onSuccess }: ClickButtonProps) {
 
     startTransition(async () => {
       try {
-        // Pass the user ID to the server action
-        const result = await handleClickAction(user.uid);
+        // Call the backend API endpoint instead of the server action
+        const response = await fetch('/api/click', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ uid: user.uid }), // Send user ID in the request body
+        });
 
-        onSuccess(result); // Call the parent callback with the result
+        const result: ClickApiResponse = await response.json();
 
-        // Only show a toast if a reward was won
-        if (result.success && result.rewardWon && result.rewardWon > 0) {
-            const toastTitle = "恭喜！(Congratulations!)";
-            // Use the specific win message from the server action, or a fallback
-            const toastDescription = result.message || `您贏得了 $${result.rewardWon}! (You won $${result.rewardWon}!)`;
+        if (response.ok && result.success) {
+            // Call the parent callback with the successful result
+            onSuccess(result);
+
+             // Show toast only if a reward was won (based on API response)
+            if (result.reward) {
+                const toastTitle = "恭喜！(Congratulations!)";
+                const toastDescription = result.message || `您贏得了獎勵! (You won a reward!)`; // Use API message or generic
+                toast({
+                    title: toastTitle,
+                    description: toastDescription,
+                });
+            } else {
+                 // Optionally show a subtle success message for regular clicks
+                 // toast({ description: result.message || "Click recorded!" });
+            }
+        } else {
+             // Handle API error or unsuccessful response
+             console.error("API Click Error:", result.error || `Status: ${response.status}`);
+             const errorDescription = result.error || '點擊失敗，請稍後再試。(Click failed, please try again later.)';
             toast({
-            title: toastTitle,
-            description: toastDescription,
+                title: "點擊失敗 (Click Failed)",
+                description: errorDescription,
+                variant: "destructive",
             });
-        } else if (!result.success && result.error) {
-           // Show error toast only if an error message exists (e.g., quota exceeded)
-           // Avoid showing generic failure toasts unless necessary.
-           // The quota message below the button handles the quota case.
-           if (result.error !== "用戶每日點擊次數已用完 (User daily click quota exhausted).") {
-               toast({
-                 title: "點擊失敗 (Click Failed)",
-                 description: result.error,
-                 variant: "destructive",
-               });
-           }
+            // Optionally call onSuccess even on failure if parent needs to know
+            // onSuccess(result);
         }
       } catch (error) {
-        console.error("Click action error:", error);
-         // Show toast for unexpected errors (optional)
+        console.error("API request error:", error);
+         // Show toast for network or unexpected errors
          toast({
            title: "點擊時發生錯誤 (Error During Click)",
-           description: "請稍後再試。(Please try again later.)",
+           description: "無法連接伺服器，請檢查網路連線。(Could not connect to server, please check network.)",
            variant: "destructive",
          });
       } finally {

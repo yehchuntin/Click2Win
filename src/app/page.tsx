@@ -5,103 +5,137 @@ import { ClickButton } from "@/components/click-button";
 import { GlobalInfoDisplay } from "@/components/global-info-display";
 import { UserInfoDisplay } from "@/components/user-info-display";
 import { Separator } from "@/components/ui/separator";
-import { getUserAccount } from "@/services/account";
-import { getGlobalClickCount } from "@/services/reward";
-import { getCurrentRewardTarget } from "@/lib/reward-logic";
-import { BonusButton } from "@/components/bonus-button";
-import { useState, useEffect } from 'react';
+// Removed direct service imports: import { getUserAccount } from "@/services/account";
+// Removed direct service imports: import { getGlobalClickCount } from "@/services/reward";
+// Removed direct logic import: import { getCurrentRewardTarget } from "@/lib/reward-logic";
+import { BonusButton } from "@/components/bonus-button"; // Keep BonusButton
+import { useState, useEffect, useCallback } from 'react';
 import { SponsorActivityArea } from '@/components/home/sponsor-activity-area'; // Import Sponsor Activity Area
 import { BottomNavBar } from '@/components/layout/bottom-nav-bar'; // Import Bottom Navigation Bar
-import type { UserAccount } from '@/services/account'; // Import UserAccount type
-import type { ClickActionResult } from '@/app/actions/click-actions'; // Import action result type
+import type { UserAccount } from '@/services/account'; // Import UserAccount type from updated service
+// Removed action result type: import type { ClickActionResult } from '@/app/actions/click-actions';
 import { useAuth } from "@/hooks/use-auth"; // Import useAuth hook
 import { Loader2 } from "lucide-react"; // Import Loader
+import { useToast } from "@/hooks/use-toast"; // Import useToast
 
-// Interface for props passed *from* the server component wrapper (if any)
-// For this fully client component, initial data fetching happens client-side
-// interface HomePageProps {
-//     initialGlobalClickCount: number; // Example if global count fetched server-side
-// }
+// Define the expected API response structure for click results
+interface ClickApiResponse {
+    success: boolean;
+    message?: string;
+    error?: string;
+    totalClicks?: number; // Global total clicks
+    todayClicks?: number; // User's clicks today after this click
+    reward?: { type: string; amount: number | string };
+}
 
-// Client Component for the main content and data fetching
+
 export default function Home() {
     const { user, loading: authLoading } = useAuth(); // Get user and loading state
+    const { toast } = useToast();
     const [userAccount, setUserAccount] = useState<UserAccount | null>(null);
-    const [globalClickCount, setGlobalClickCount] = useState<number | null>(null); // Initialize as null
-    const [userClicksForTask, setUserClicksForTask] = useState(0); // Example state for task tracking
-    const [loadingData, setLoadingData] = useState(true); // State for data loading
+    // Global click count is now fetched within GlobalInfoDisplay
+    // const [globalClickCount, setGlobalClickCount] = useState<number | null>(null);
+    const [userClicksForTask, setUserClicksForTask] = useState(0); // Example state for bonus task tracking
+    const [loadingUserData, setLoadingUserData] = useState(true); // State for user data loading
 
-    // Fetch initial data on component mount or when user changes
+    // Fetch user account data when user logs in or on mount if already logged in
+    const fetchUserAccount = useCallback(async (uid: string) => {
+        console.log("Fetching user account via API for:", uid);
+        setLoadingUserData(true);
+        try {
+            // Replace with an API call if you create a dedicated endpoint for user data
+            // For now, we'll rely on the ensureUserExists happening implicitly
+            // during the first click or other actions, or fetch it directly if needed.
+            // Example direct fetch (requires creating this service function):
+            // const account = await getUserAccountFromApi(uid); // You'd need to create this
+            // setUserAccount(account);
+
+            // Simulate fetching or assume it will be populated by interactions
+             // If getUserAccount is client-callable (less ideal for sensitive data)
+             // import { getUserAccount } from '@/services/account'; // Needs 'use client' in service potentially
+             // const account = await getUserAccount(uid);
+             // setUserAccount(account);
+
+             // TEMPORARY: Simulate fetching user data (replace with API call or ensureUserExists call)
+             // This is non-ideal as it uses a server-intended function client-side
+             // You should ideally fetch this via an API route GET /api/user/{uid} or similar
+             console.warn("Simulating user data fetch client-side. Replace with API call.");
+             // Dummy data until API is ready
+             setUserAccount({
+                 uid: uid,
+                 todayClicks: 0, // Will update after first click API call
+                 dailyQuota: 50, // Default, will sync after first click
+                 totalClicks: 0, // Will update after first click
+                 rewards: [],
+                 // email: user?.email || '', // Get from auth context
+                 // displayName: user?.displayName || '' // Get from auth context
+             });
+
+
+        } catch (error) {
+            console.error("Error fetching user account data:", error);
+            toast({ title: "無法載入用戶資料 (Failed to load user data)", variant: "destructive" });
+            setUserAccount(null); // Set to null on error
+        } finally {
+            setLoadingUserData(false); // Finish loading user data
+        }
+    }, [toast]); // Added toast dependency
+
     useEffect(() => {
-        async function fetchData() {
-            setLoadingData(true); // Start loading data
-            try {
-                // Fetch global count regardless of auth state
-                const globalCount = await getGlobalClickCount();
-                setGlobalClickCount(globalCount);
-
-                // Fetch user account only if logged in
-                if (user) {
-                    console.log("Fetching user account for:", user.uid);
-                    const account = await getUserAccount(user.uid);
-                    setUserAccount(account);
-                    // Potentially set initial userClicksForTask based on account data if stored
-                } else {
-                    setUserAccount(null); // Clear account if logged out
-                }
-            } catch (error) {
-                console.error("Error fetching initial data:", error);
-                // Optionally set error state or show toast
-            } finally {
-                setLoadingData(false); // Finish loading data
-            }
+        if (!authLoading && user) {
+            fetchUserAccount(user.uid);
+        } else if (!authLoading && !user) {
+            // User logged out, clear account data and stop loading
+            setUserAccount(null);
+            setLoadingUserData(false);
         }
+        // If auth is loading, do nothing, wait for it to finish
+    }, [user, authLoading, fetchUserAccount]);
 
-        // Only fetch data when auth loading is finished
-        if (!authLoading) {
-             fetchData();
-        }
 
-    }, [user, authLoading]); // Depend on user and authLoading state
+    // Removed getCurrentRewardTarget logic, handled by GlobalInfoDisplay
 
-    const currentRewardTarget = globalClickCount !== null
-        ? getCurrentRewardTarget(globalClickCount)
-        : { clicks: 0, amount: 0 }; // Default if global count not loaded
-
-    const handleRewardClaimed = async () => {
+    const handleRewardClaimed = useCallback(async () => {
         console.log("Reward claimed, refetching user state...");
         if (user) {
-            try {
-                const updatedAccount = await getUserAccount(user.uid);
-                setUserAccount(updatedAccount);
-            } catch (error) {
-                console.error("Error refetching user account after reward claim:", error);
-            }
+           await fetchUserAccount(user.uid); // Refetch user data after claim
         }
-    };
+    }, [user, fetchUserAccount]);
 
-    // Callback for ClickButton to update state after a successful click
-    const handleSuccessfulClick = (result: ClickActionResult) => {
+
+    // Callback for ClickButton to update state after a successful API call
+    const handleSuccessfulClick = (result: ClickApiResponse) => {
         if (result.success) {
-            // Update user account state if it exists and quota is returned
-            if (userAccount && result.newQuota !== undefined) {
-                setUserAccount(prev => prev ? { ...prev, dailyClickQuota: result.newQuota! } : null);
+            // Update user account state based on API response
+             if (userAccount && result.todayClicks !== undefined) {
+                  // Also update total clicks if provided by API
+                 const updatedTotalClicks = result.totalClicks !== undefined
+                     ? (userAccount.totalClicks + 1) // Rough client-side update (API totalClicks is global)
+                     : userAccount.totalClicks;
+
+                 setUserAccount(prev => prev ? {
+                    ...prev,
+                    todayClicks: result.todayClicks!,
+                    // Daily quota might change, fetchUserAccount might be better after click
+                    // dailyQuota: result.newQuota !== undefined ? result.newQuota : prev.dailyQuota,
+                    totalClicks: updatedTotalClicks, // Update local total
+                 } : null);
             }
-            // Update global click count state if returned
-            if (result.newGlobalCount !== undefined) {
-                setGlobalClickCount(result.newGlobalCount);
-            }
-             // Increment task clicks locally for demonstration
+            // No need to update globalClickCount state here, GlobalInfoDisplay handles it
+
+             // Increment local task clicks state for demonstration
              setUserClicksForTask(prev => prev + 1);
         }
-        // Error handling or specific messages are handled by the toast in ClickButton/action
+        // Error handling or specific messages are handled by the toast in ClickButton or the API response itself
     };
 
     // Determine current quota, handling null userAccount
-    const currentQuota = userAccount ? userAccount.dailyClickQuota : 0;
+    const currentQuota = userAccount ? userAccount.dailyQuota - userAccount.todayClicks : 0;
+    const remainingQuota = Math.max(0, currentQuota);
 
-    // Show loading spinner if auth or data is loading
-    if (authLoading || loadingData) {
+
+    // Show loading spinner if auth or user data is loading
+    if (authLoading || loadingUserData) {
         return (
             <div className="flex min-h-[calc(100vh-var(--header-height)-var(--footer-height))] items-center justify-center">
                 <Loader2 className="h-16 w-16 animate-spin text-primary" />
@@ -125,59 +159,41 @@ export default function Home() {
                         Click<span className="text-primary">2</span>Win
                     </h1>
 
-                    {/* Display global info and user info only when data is loaded */}
-                    {globalClickCount !== null && (
-                        <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
-                            {user ? (
-                                userAccount ? (
-                                    <UserInfoDisplay
-                                        dailyClickQuota={userAccount.dailyClickQuota} // Use state value
-                                        referralCount={userAccount.referralCount}
-                                    />
-                                ) : (
-                                     // Still loading user account specifically
-                                     <div className="md:col-span-1 flex items-center justify-center"><Loader2 className="h-5 w-5 animate-spin" /></div>
-                                )
-                            ) : (
-                            <div className="md:col-span-1 flex items-center justify-center text-muted-foreground p-4 bg-card/50 rounded-lg border border-border/30">請先登入 (Please Log In)</div>
-                            )}
+                    {/* Display global info and user info */}
+                    <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+                        {/* Pass userAccount state to UserInfoDisplay */}
+                        <UserInfoDisplay userAccount={userAccount} />
 
-                            <Separator orientation="vertical" className="hidden md:block mx-auto h-auto" />
-                            <Separator orientation="horizontal" className="block md:hidden my-4 w-full" />
+                        <Separator orientation="vertical" className="hidden md:block mx-auto h-auto" />
+                        <Separator orientation="horizontal" className="block md:hidden my-4 w-full" />
 
-                            <GlobalInfoDisplay
-                                globalClickCount={globalClickCount} // Use state value
-                                rewardTarget={currentRewardTarget.clicks}
-                                rewardAmount={currentRewardTarget.amount}
-                            />
-                        </div>
-                    )}
+                        {/* GlobalInfoDisplay fetches its own data */}
+                        <GlobalInfoDisplay />
+                    </div>
+
 
                     <Separator className="my-6 md:my-8 w-full max-w-lg" />
 
-                     {/* Only show click button if logged in and userAccount is loaded */}
-                    {user && userAccount ? (
+                     {/* Only show click button if logged in */}
+                    {user ? (
                         <ClickButton
-                            remainingQuota={currentQuota} // Pass current quota from state
+                            remainingQuota={remainingQuota} // Pass remaining quota
                             onSuccess={handleSuccessfulClick} // Pass the callback
                         />
-                    ) : !user ? (
+                    ) : (
                         <p className="text-accent-foreground">登入後即可開始點擊！(Log in to start clicking!)</p>
-                     ) : (
-                         // User is logged in, but account data might still be loading or failed
-                         <p className="text-muted-foreground">載入中... (Loading...)</p>
                      )}
 
 
                      {/* Bonus Button Example - Conditionally render or disable if not logged in */}
                     <div className="mt-8">
                         <BonusButton
-                            type="task"
-                            rewardAmount={50}
-                            clicksRequired={100}
-                            userClicks={userClicksForTask} // Pass dynamic user clicks state
-                            onRewardClaimed={handleRewardClaimed}
-                            disabled={!user || !userAccount} // Disable if not logged in or account not loaded
+                            type="task" // Example bonus type
+                            rewardAmount={50} // Example reward
+                            clicksRequired={100} // Example task requirement
+                            userClicks={userClicksForTask} // Pass dynamic user clicks state for this task
+                            onRewardClaimed={handleRewardClaimed} // Callback when reward is claimed
+                            disabled={!user} // Disable if not logged in
                         />
                      </div>
 

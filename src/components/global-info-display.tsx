@@ -1,50 +1,102 @@
-"use client"; // Required for useEffect
+"use client"; // Required for useEffect and useState
 
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Globe, Trophy } from "lucide-react";
+import { Globe, Trophy, Loader2 } from "lucide-react";
 
-interface GlobalInfoDisplayProps {
-  globalClickCount: number;
-  rewardTarget: number;
-  rewardAmount: number;
+// Interface for the data fetched from the API
+interface GlobalInfoData {
+  totalClicks: number;
+  nextRewardThreshold: number;
+  nextRewardAmount: number | string;
 }
 
-export function GlobalInfoDisplay({ globalClickCount: initialGlobalCount, rewardTarget, rewardAmount }: GlobalInfoDisplayProps) {
-  // Use state to manage global count to avoid hydration mismatch if it were dynamic
-  const [globalClickCount, setGlobalClickCount] = useState(initialGlobalCount);
+// Props for the component (initial data can be passed, but fetching is primary)
+interface GlobalInfoDisplayProps {
+  // Optional: Pass initial data to avoid initial loading state if fetched server-side
+  initialData?: GlobalInfoData;
+}
+
+export function GlobalInfoDisplay({ initialData }: GlobalInfoDisplayProps) {
+  const [globalInfo, setGlobalInfo] = useState<GlobalInfoData | null>(initialData || null);
+  const [isLoading, setIsLoading] = useState(!initialData); // Start loading if no initial data
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // If this needs to be updated dynamically (e.g., via websockets or polling),
-    // update logic would go here. For now, just ensures client matches server prop.
-    setGlobalClickCount(initialGlobalCount);
-  }, [initialGlobalCount]);
+    const fetchGlobalInfo = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await fetch('/api/global'); // Fetch from the new API endpoint
+        if (!response.ok) {
+           throw new Error(`Failed to fetch global info: ${response.statusText}`);
+        }
+        const data: GlobalInfoData = await response.json();
+        setGlobalInfo(data);
+      } catch (err: any) {
+        console.error("Error fetching global info:", err);
+        setError("無法載入全球資訊。(Could not load global info.)");
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
+    // Fetch data initially if no initialData is provided
+    if (!initialData) {
+         fetchGlobalInfo();
+    }
 
-  const clicksToGo = Math.max(0, rewardTarget - globalClickCount);
+    // Optional: Set up polling or use websockets for real-time updates
+    // const intervalId = setInterval(fetchGlobalInfo, 15000); // Example: Fetch every 15 seconds
+    // return () => clearInterval(intervalId);
+
+  }, [initialData]); // Depend on initialData to prevent re-fetch if provided
+
+  const renderContent = () => {
+    if (isLoading) {
+        return <div className="flex items-center justify-center h-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+    }
+    if (error) {
+      return <p className="text-xs text-destructive text-center h-20 flex items-center justify-center">{error}</p>;
+    }
+    if (globalInfo) {
+        const clicksToGo = Math.max(0, globalInfo.nextRewardThreshold - globalInfo.totalClicks);
+        return (
+        <>
+          <div className="text-2xl font-bold text-foreground">
+            {globalInfo.totalClicks.toLocaleString()}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            目前全球點擊次數 (Global Clicks)
+          </p>
+          <div className="mt-4 flex items-center">
+            <Trophy className="h-4 w-4 mr-2 text-yellow-400" />
+            <span className="text-sm font-semibold text-foreground">
+                下個獎勵 ${globalInfo.nextRewardAmount.toLocaleString()} (Next Reward)
+            </span>
+            <p className="text-xs text-muted-foreground ml-1">
+                (目標 {globalInfo.nextRewardThreshold.toLocaleString()} 次)
+            </p>
+          </div>
+           <p className="text-xs text-muted-foreground mt-1">
+               (還差 {clicksToGo.toLocaleString()} 次點擊)
+           </p>
+        </>
+        );
+    }
+    return <p className="text-xs text-muted-foreground text-center h-20 flex items-center justify-center">無法載入資料。(No data available.)</p>; // Fallback
+  };
 
   return (
     <Card className="bg-card/80 backdrop-blur-sm shadow-md border-border/50">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium text-card-foreground">
-          全球進度
+          全球進度 (Global Progress)
         </CardTitle>
         <Globe className="h-4 w-4 text-muted-foreground" />
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold text-foreground">
-           {globalClickCount.toLocaleString()} / {rewardTarget.toLocaleString()}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          目前全球點擊次數 / 目標
-        </p>
-        <div className="mt-4 flex items-center">
-          <Trophy className="h-4 w-4 mr-2 text-yellow-400" /> {/* Use yellow for trophy */}
-          <span className="text-sm font-semibold text-foreground">${rewardAmount.toLocaleString()}</span>
-          <p className="text-xs text-muted-foreground ml-1">
-             (還差 {clicksToGo.toLocaleString()} 次點擊)
-          </p>
-        </div>
+        {renderContent()}
       </CardContent>
     </Card>
   );

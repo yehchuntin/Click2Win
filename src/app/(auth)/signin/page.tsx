@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from '@/lib/firebase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +10,47 @@ import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 import Image from 'next/image'; // Import Image component
+import { ensureUserExists } from '@/services/account'; // Import ensureUserExists (needs adjustment for client/server)
+
+// --- Client-side adaptation for ensureUserExists ---
+// Ideally, ensureUserExists is triggered server-side or via a dedicated API endpoint after login.
+// Calling the server-side Firestore function directly from the client is generally not recommended.
+// Option 1: Create an API endpoint `/api/user/ensure`
+// Option 2: Trigger a Cloud Function on Firebase Auth user creation.
+// Option 3 (Temporary/Less Secure): If ensureUserExists needs basic info only,
+//             make a client-callable version or pass data to server action/API.
+
+// For this example, we'll *simulate* the call, assuming it happens elsewhere or via API.
+// Replace this with your actual implementation (e.g., API call).
+async function ensureUserExistsClient(user: User): Promise<void> {
+     console.log("Attempting to ensure user exists (client simulation):", user.uid);
+     // In a real app, call your API endpoint here:
+     /*
+     try {
+         const response = await fetch('/api/user/ensure', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({
+                 uid: user.uid,
+                 email: user.email,
+                 displayName: user.displayName
+             }),
+         });
+         if (!response.ok) {
+             const errorData = await response.json();
+             throw new Error(errorData.error || 'Failed to ensure user exists via API');
+         }
+         console.log("User ensured via API call for:", user.uid);
+     } catch (error) {
+         console.error("Error calling ensureUserExists API:", error);
+         // Handle error appropriately (e.g., show toast)
+     }
+     */
+     // Placeholder simulation:
+     await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
+     console.log("User existence check simulated for:", user.uid);
+}
+
 
 export default function SignInPage() {
   const router = useRouter();
@@ -20,25 +61,34 @@ export default function SignInPage() {
   useEffect(() => {
     if (!auth) {
       console.warn("Firebase Auth not initialized.");
-      setLoading(false); // Stop loading if auth isn't available
-      // Optionally show an error message or disable sign-in
+      setLoading(false);
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => { // Make async
       if (user) {
-        // User is signed in, redirect to home page
-        console.log("User already signed in, redirecting...");
+        console.log("User signed in:", user.uid);
+        // Store UID in localStorage
+        localStorage.setItem('userUID', user.uid);
+        console.log("User UID stored in localStorage.");
+
+        // Ensure user exists in Firestore backend
+        // IMPORTANT: Replace simulation with actual API call or backend trigger
+        await ensureUserExistsClient(user);
+
+        // Redirect to home page after ensuring user exists
         router.push('/');
       } else {
-        // User is signed out, stop loading
+        // User is signed out, clear UID from localStorage
+        localStorage.removeItem('userUID');
+        console.log("User signed out, UID removed from localStorage.");
         setLoading(false);
       }
     });
 
     // Cleanup subscription on unmount
     return () => unsubscribe();
-  }, [router]);
+  }, [router, toast]); // Added toast dependency
 
   const handleSignInGoogle = async () => {
     if (!auth) {
@@ -49,8 +99,8 @@ export default function SignInPage() {
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-      // Redirect is handled by onAuthStateChanged listener
-       toast({ title: "登入成功 (Sign In Successful)", description: "即將跳轉至主頁。(Redirecting to home page...)" });
+      // Redirect and user creation are handled by onAuthStateChanged listener
+       toast({ title: "登入成功 (Sign In Successful)", description: "正在處理使用者資料並跳轉。(Processing user data and redirecting...)" });
     } catch (error: any) {
       console.error("Google Sign-In Error:", error);
        let description = "登入時發生錯誤，請稍後再試。(An error occurred during sign-in. Please try again later.)";
@@ -58,15 +108,17 @@ export default function SignInPage() {
            description = "登入彈窗已關閉。(Sign-in popup closed.)";
        } else if (error.code === 'auth/cancelled-popup-request') {
            description = "已取消登入請求。(Sign-in request cancelled.)";
+       } else if (error.code === 'auth/account-exists-with-different-credential') {
+            description = "該電子郵件已使用其他方式註冊。(Email already registered with a different method.)";
        }
        toast({
          title: "登入失敗 (Sign-In Failed)",
          description: description,
          variant: "destructive",
       });
-      setSignInLoading(false);
+      setSignInLoading(false); // Stop loading only on error
     }
-    // No need to setSignInLoading(false) on success because redirection will happen
+    // Don't setSignInLoading(false) on success here, wait for onAuthStateChanged
   };
 
   if (loading) {
@@ -110,9 +162,13 @@ export default function SignInPage() {
             )}
             {signInLoading ? '登入中...(Signing In...)' : '使用 Google 登入 (Sign in with Google)'}
           </Button>
-           {/* Placeholder for potential future sign-in methods */}
-           {/* <Separator className="my-4" />
-           <p className="text-center text-xs text-muted-foreground">或其他方式 (Or other methods)</p> */}
+           {/* Placeholder for potential future sign-in methods (Apple, Facebook) */}
+           {/*
+           <Separator className="my-4" />
+           <p className="text-center text-xs text-muted-foreground">或其他方式 (Or other methods)</p>
+           <Button onClick={handleSignInFacebook} variant="outline" disabled={signInLoading}>Sign in with Facebook</Button>
+           <Button onClick={handleSignInApple} variant="outline" disabled={signInLoading}>Sign in with Apple</Button>
+           */}
         </CardContent>
       </Card>
     </div>

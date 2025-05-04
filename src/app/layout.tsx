@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google'; // Use Inter or keep Geist
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"; // Import Toaster
-import { AppBar } from '@/components/layout/app-bar'; // Import AppBar
+// Removed AppBar import: import { AppBar } from '@/components/layout/app-bar';
 import { AuthProvider } from '@/hooks/use-auth'; // Import AuthProvider
 
 const inter = Inter({ subsets: ['latin'] }); // Example using Inter
@@ -36,9 +36,9 @@ export default function RootLayout({
       <body className={`${inter.className} antialiased flex flex-col min-h-screen`}>
          {/* Or if using Geist: <body className={`${fontVariables} antialiased flex flex-col min-h-screen`}> */}
          <AuthProvider> {/* Wrap content with AuthProvider */}
-           {/* AppBar remains outside main if fixed, or inside if part of scrolling content */}
-           <AppBar /> {/* Add AppBar here */}
-           <main className="flex-1 pt-14"> {/* Add padding-top to avoid content overlap with fixed AppBar */}
+           {/* Removed AppBar */}
+           {/* Adjust main padding since AppBar is removed */}
+           <main className="flex-1 pt-4"> {/* Reduced padding-top */}
                 {children}
            </main>
            <Toaster /> {/* Add Toaster component here */}
