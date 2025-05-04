@@ -24,6 +24,7 @@ export function ClickButton({ initialQuota }: ClickButtonProps) {
 
   const handleButtonClick = async () => {
     if (remainingQuota <= 0 || isLoading || isPending) {
+      // Keep toast for inability to click
       toast({
         title: "無法點擊 (Cannot Click)",
         description: remainingQuota <= 0 ? "您今天的點擊次數已用完。(Your clicks for today are used up.)" : "請稍候再試。(Please wait and try again.)",
@@ -42,23 +43,20 @@ export function ClickButton({ initialQuota }: ClickButtonProps) {
           // Ensure quota doesn't visually go below 0 if multiple clicks happen before state update
           setRemainingQuota((prev) => Math.max(0, prev - 1));
 
-          // Determine title and description based on reward
-          let toastTitle = "點擊成功！(Click Successful!)";
-          let toastDescription = "點擊已記錄 (Click recorded)."; // Default simple message
-
+          // Only show a toast if a reward was won
           if (result.rewardWon && result.rewardWon > 0) {
-            // Only show the detailed win message if a reward was won
-            toastTitle = "恭喜！(Congratulations!)";
+            const toastTitle = "恭喜！(Congratulations!)";
             // Use the specific win message from the server action, or a fallback
-            toastDescription = result.message || `您贏得了 $${result.rewardWon}! (You won $${result.rewardWon}!)`;
+            const toastDescription = result.message || `您贏得了 $${result.rewardWon}! (You won $${result.rewardWon}!)`;
+            toast({
+              title: toastTitle,
+              description: toastDescription,
+            });
           }
-
-          toast({
-            title: toastTitle,
-            description: toastDescription,
-          });
+          // No toast for regular successful clicks without a reward
 
         } else {
+          // Keep toast for failed clicks
           toast({
             title: "點擊失敗 (Click Failed)",
             description: result.error || "發生未知錯誤。(An unknown error occurred.)",
@@ -71,6 +69,7 @@ export function ClickButton({ initialQuota }: ClickButtonProps) {
         }
       } catch (error) {
         console.error("Click action error:", error);
+        // Keep toast for unexpected errors
         toast({
           title: "點擊時發生錯誤 (Error During Click)",
           description: "請稍後再試。(Please try again later.)",
