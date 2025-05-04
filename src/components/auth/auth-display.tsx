@@ -24,9 +24,12 @@ export function AuthDisplay() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
-    if (!auth) {
+    // Early return if Firebase isn't configured
+    // This prevents errors if auth is null
+    if (!isFirebaseConfigured || !auth) {
+        console.warn("Firebase not configured or auth object is null. Auth functionality disabled.");
         setLoading(false);
-        return; // Don't run if Firebase isn't configured
+        return;
     }
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -60,13 +63,9 @@ export function AuthDisplay() {
     }
   };
 
+  // Render nothing if Firebase is not configured, instead of a warning button
   if (!isFirebaseConfigured) {
-     return (
-        <Button variant="destructive" disabled size="sm">
-            <AlertTriangle className="mr-2 h-4 w-4" />
-            Firebase Not Configured
-        </Button>
-     );
+     return null;
   }
 
   if (loading) {
