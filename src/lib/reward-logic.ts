@@ -5,14 +5,15 @@ export interface RewardLevel {
 
 // Define the reward structure - ascending order of clicks
 export const REWARD_LEVELS: RewardLevel[] = [
-  { clicks: 100, amount: 5 },
-  { clicks: 500, amount: 10 },
-  { clicks: 1000, amount: 25 },
-  { clicks: 5000, amount: 50 },
-  { clicks: 10000, amount: 100 },
+  { clicks: 10000, amount: 20 },
+  { clicks: 20000, amount: 45 },
+  { clicks: 50000, amount: 100 },
+  { clicks: 100000, amount: 200 },
+  { clicks: 200000, amount: 500 },
   // Add more levels as needed
 ];
 
+// Ensure these are updated if REWARD_LEVELS changes significantly
 const MIN_REWARD = REWARD_LEVELS[0];
 const MAX_REWARD = REWARD_LEVELS[REWARD_LEVELS.length - 1];
 
@@ -24,34 +25,48 @@ const MAX_REWARD = REWARD_LEVELS[REWARD_LEVELS.length - 1];
  * @returns The RewardLevel representing the current target.
  */
 export function getCurrentRewardTarget(globalClickCount: number): RewardLevel {
+    if (REWARD_LEVELS.length === 0) {
+        console.error("REWARD_LEVELS is empty. Cannot determine target.");
+        return { clicks: Infinity, amount: 0 }; // Or some default/error state
+    }
+
   // Find the first reward level where the required clicks are greater than the current count
   for (const level of REWARD_LEVELS) {
     if (globalClickCount < level.clicks) {
       return level;
     }
   }
-  // If all levels are passed, loop back to the minimum reward target.
-  // The target becomes the *next* occurrence of the minimum reward click count.
-  // Calculate how many full cycles have passed.
-  const cycles = Math.floor(globalClickCount / MAX_REWARD.clicks);
-  // Find the click count within the current cycle.
-  const countInCycle = globalClickCount % MAX_REWARD.clicks;
 
-   // Find the next applicable reward target within the cycle, or loop to the next cycle's minimum
+  // If all levels are passed, loop back based on the highest reward click count.
+  const maxRewardClicks = MAX_REWARD.clicks;
+  if (maxRewardClicks <= 0) {
+      console.error("MAX_REWARD has invalid clicks value. Cannot loop.", MAX_REWARD);
+      // Fallback: Target the next lowest reward level hypothetically
+      return { clicks: globalClickCount + (REWARD_LEVELS[0]?.clicks || 100), amount: REWARD_LEVELS[0]?.amount || 5 };
+  }
+
+
+  // Calculate how many full cycles of the *entire* reward structure have passed.
+  const cycles = Math.floor(globalClickCount / maxRewardClicks);
+  // Find the click count relative to the start of the *potential* next cycle.
+  const countInCycle = globalClickCount % maxRewardClicks;
+
+   // Find the next applicable reward target within the base levels, or loop to the next cycle's minimum
   for (const level of REWARD_LEVELS) {
+    // If the count within the current cycle progression is less than this level's base clicks,
+    // then this level is the next target, adjusted for the completed cycles.
     if (countInCycle < level.clicks) {
-       // Target is this level, but adjusted for the number of cycles passed
       return {
-        clicks: cycles * MAX_REWARD.clicks + level.clicks,
+        clicks: cycles * maxRewardClicks + level.clicks,
         amount: level.amount
       };
     }
   }
 
-  // If countInCycle is >= MAX_REWARD.clicks (shouldn't happen with modulo, but as fallback),
+  // If countInCycle is >= maxRewardClicks (meaning we just hit or passed the last reward),
   // target the minimum reward in the *next* cycle.
    return {
-     clicks: (cycles + 1) * MAX_REWARD.clicks + MIN_REWARD.clicks,
+     clicks: (cycles + 1) * maxRewardClicks + MIN_REWARD.clicks,
      amount: MIN_REWARD.amount
    };
 }
@@ -65,47 +80,71 @@ export function getCurrentRewardTarget(globalClickCount: number): RewardLevel {
  * @returns The next RewardLevel.
  */
 export function getNextRewardLevel(globalClickCount: number): RewardLevel {
-  const currentTarget = getCurrentRewardTarget(globalClickCount);
+    if (REWARD_LEVELS.length === 0) {
+        console.error("REWARD_LEVELS is empty. Cannot determine next level.");
+        return { clicks: Infinity, amount: 0 };
+    }
 
-  // Find the index of the current target in the REWARD_LEVELS array
-  const currentIndex = REWARD_LEVELS.findIndex(level => level.amount === currentTarget.amount && level.clicks % MAX_REWARD.clicks === currentTarget.clicks % MAX_REWARD.clicks );
+    const currentTarget = getCurrentRewardTarget(globalClickCount);
+    const maxRewardClicks = MAX_REWARD.clicks;
+
+    if (maxRewardClicks <= 0) {
+         console.error("MAX_REWARD has invalid clicks value. Cannot get next level.", MAX_REWARD);
+         return currentTarget; // Return current as fallback
+    }
+
+    // Find the index of the *base* reward level corresponding to the current target's amount and relative click position
+    const currentTargetClicksInCycle = currentTarget.clicks % maxRewardClicks || maxRewardClicks; // Handle case where clicks is multiple of maxRewardClicks
+    const currentIndex = REWARD_LEVELS.findIndex(level => level.clicks === currentTargetClicksInCycle);
+
+    if (currentIndex === -1) {
+        // This might happen if currentTarget.clicks is not aligned with base levels (e.g., mid-cycle)
+        // Or if the current target calculation resulted in something unexpected.
+        console.warn(`Could not find current reward index for target ${currentTarget.clicks}. Recalculating base.`);
+        // Find the base level just below or equal to the count in cycle
+        const countInCycle = globalClickCount % maxRewardClicks;
+        let baseIndex = REWARD_LEVELS.length - 1;
+        for (let i = 0; i < REWARD_LEVELS.length; i++) {
+            if (countInCycle < REWARD_LEVELS[i].clicks) {
+                baseIndex = (i === 0 ? REWARD_LEVELS.length - 1 : i - 1);
+                break;
+            }
+        }
+        const nextIndex = (baseIndex + 1) % REWARD_LEVELS.length;
+        const nextLevelBase = REWARD_LEVELS[nextIndex];
+        const cycles = Math.floor(globalClickCount / maxRewardClicks);
+         const nextTargetClicks = (nextIndex === 0 ? (cycles + 1) : cycles) * maxRewardClicks + nextLevelBase.clicks;
+
+        return {
+             clicks: nextTargetClicks,
+             amount: nextLevelBase.amount,
+        };
+    }
+
+    const nextIndex = (currentIndex + 1) % REWARD_LEVELS.length;
+    const nextLevelBase = REWARD_LEVELS[nextIndex];
+
+    // Calculate the correct click target considering cycles
+    const baseTargetClicks = currentTarget.clicks;
+    let nextTargetClicks: number;
+
+    // Determine the cycle number based on the *current* target
+    const currentCycle = Math.floor((baseTargetClicks - 1) / maxRewardClicks);
 
 
-  if (currentIndex === -1) {
-     // Should not happen if currentTarget is valid, but fallback to minimum
-     console.warn("Could not find current reward index, defaulting to minimum.");
-     return getCurrentRewardTarget(globalClickCount); // Recalculate to be safe or return MIN adjusted
-  }
-
-  const nextIndex = (currentIndex + 1) % REWARD_LEVELS.length;
-  const nextLevelBase = REWARD_LEVELS[nextIndex];
-
-  // Calculate the correct click target considering cycles
-  const baseTargetClicks = currentTarget.clicks;
-  let nextTargetClicks: number;
-
-  if (nextIndex === 0) { // We looped back to the minimum reward
-      // Calculate the start of the next cycle
-      const currentCycleEnd = Math.ceil(baseTargetClicks / MAX_REWARD.clicks) * MAX_REWARD.clicks;
-       nextTargetClicks = currentCycleEnd + nextLevelBase.clicks;
-
-       // Edge case: if baseTargetClicks is exactly MAX_REWARD.clicks
-       if (baseTargetClicks % MAX_REWARD.clicks === 0 && baseTargetClicks > 0) {
-         nextTargetClicks = baseTargetClicks + nextLevelBase.clicks;
-       }
+    if (nextIndex === 0) { // We looped back to the minimum reward
+        // Target is the base clicks of the next level in the *next* cycle
+        nextTargetClicks = (currentCycle + 1) * maxRewardClicks + nextLevelBase.clicks;
+    } else {
+       // Target is the base clicks of the next level in the *current* cycle
+       nextTargetClicks = currentCycle * maxRewardClicks + nextLevelBase.clicks;
+    }
 
 
-  } else {
-      // Calculate the start of the current cycle
-      const currentCycleStart = Math.floor((baseTargetClicks -1) / MAX_REWARD.clicks) * MAX_REWARD.clicks;
-      nextTargetClicks = currentCycleStart + nextLevelBase.clicks;
-  }
-
-
-  return {
-    clicks: nextTargetClicks,
-    amount: nextLevelBase.amount,
-  };
+    return {
+        clicks: nextTargetClicks,
+        amount: nextLevelBase.amount,
+    };
 }
 
 
