@@ -34,11 +34,6 @@ export default function RootLayout({
       {/* Use appropriate font class based on your choice */}
       <body className={`${inter.className} antialiased flex flex-col min-h-screen`}>
         {/* Or if using Geist: <body className={`${fontVariables} antialiased flex flex-col min-h-screen`}> */}
-        <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <div className="container flex h-14 items-center justify-end">
-                 <AuthDisplay /> {/* Use the new AuthDisplay component */}
-            </div>
-        </header>
         <main className="flex-1">
              {children}
         </main>
@@ -47,3 +42,4 @@ export default function RootLayout({
     </html>
   );
 }
+
